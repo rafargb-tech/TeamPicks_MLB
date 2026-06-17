@@ -1,16 +1,20 @@
 """
 TeamPicks_MLB — Capa de datos (modulo)
-Version: 0.1.0
+Version: 0.2.0
 
 Estrategia: Moneyline / desequilibrio pitcheo-ofensiva.
-Este modulo NO imprime: devuelve estructuras de datos para que app.py las
-sirva como JSON. Cada capa esta marcada segun su estado de validacion.
+Este modulo NO imprime: devuelve estructuras para que app.py las sirva como JSON.
 
-[VERIFICADO]        MLB Stats API: slate+probables, mano del pitcher, game logs
-[VERIFICAR EN RENDER] pybaseball/FanGraphs: FIP/WHIP/xFIP, gmLI/SV, crosswalk IDs
-[STUB]              fetch_team_wrcplus_split(): pendiente capturar payload FanGraphs
+CAMBIO v0.2.0: se elimino pybaseball. Toda la data de FanGraphs se obtiene
+del API moderno JSON (el endpoint legacy .aspx devuelve 403). El API moderno
+incluye xMLBAMID, asi que ya no hace falta crosswalk de IDs.
+
+[VERIFICADO]   MLB Stats API: slate+probables, mano del pitcher, game logs, roster
+[VERIFICADO]   FanGraphs API moderno: FIP/WHIP/xFIP/gmLI/SV (campos confirmados)
+[STUB]         fetch_team_wrcplus_split(): pendiente Fase 3 (Splits Leaderboards)
 """
 from __future__ import annotations
+import re
 import json
 import urllib.request
 from datetime import date, datetime, timedelta
@@ -33,11 +37,26 @@ FATIGUE_MAX_PITCHES_LAST = 30   # fatigado si >30 pitcheos en su ultima salida
 CLOSERS_NEEDED_AVAILABLE = 2    # aprueba si >=2 de 3 cerradores estan listos
 
 MLB = "https://statsapi.mlb.com/api/v1"
+FG  = "https://www.fangraphs.com/api/leaders/major-league/data"
+UA  = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) "
+                      "Chrome/120 Safari/537.36")}
 
 
 def _get(url: str) -> dict:
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    return json.load(urllib.request.urlopen(req, timeout=25))
+    return json.load(urllib.request.urlopen(
+        urllib.request.Request(url, headers=UA), timeout=30))
+
+
+def _strip(s) -> str:
+    return re.sub("<[^>]+>", "", str(s)).strip()
+
+
+def _f(v):
+    try:
+        return round(float(v), 2)
+    except (TypeError, ValueError):
+        return None
 
 
 # ===========================================================================
@@ -53,6 +72,7 @@ def get_slate(day: date) -> list[dict]:
             def side(s):
                 t = s["team"]; sp = s.get("probablePitcher") or {}
                 return {"name": t["name"], "abbr": t.get("abbreviation"),
+                        "id": t.get("id"),
                         "sp_id": sp.get("id"), "sp_name": sp.get("fullName")}
             games.append({"gamePk": g["gamePk"],
                           "fecha": g.get("officialDate", day.isoformat()),
@@ -79,6 +99,16 @@ def get_pitching_logs(pid: int, season: int) -> list[dict]:
             out.append({"date": datetime.strptime(s["date"], "%Y-%m-%d").date(),
                         "pitches": st.get("numberOfPitches") or 0})
     return out
+
+
+def get_team_pitcher_ids(team_id: int, season: int) -> set[int]:
+    """IDs MLBAM de los pitchers en el roster activo (para ubicar cerradores)."""
+    data = _get(f"{MLB}/teams/{team_id}/roster?rosterType=active&season={season}")
+    ids = set()
+    for p in data.get("roster", []):
+        if p.get("position", {}).get("type") == "Pitcher":
+            ids.add(p["person"]["id"])
+    return ids
 
 
 # ===========================================================================
@@ -119,46 +149,46 @@ def bullpen_status(closer_ids: list[int], season: int, asof: date) -> dict:
 
 
 # ===========================================================================
-# CAPA 3 — FANGRAPHS via pybaseball   [VERIFICAR EN RENDER]
+# CAPA 3 — FANGRAPHS API MODERNO   [VERIFICADO]
 # ===========================================================================
-def get_starter_metrics(df, mlbam_ids: list[int]) -> dict:
-    """df = salida de pitching_stats() (se jala UNA vez en validate_game)."""
-    import pandas as pd
-    from pybaseball import playerid_reverse_lookup
-    ids = [str(i) for i in mlbam_ids if i]
-    xwalk = playerid_reverse_lookup(ids, key_type="mlbam")
-    fg_by_mlbam = {int(r.key_mlbam): int(r.key_fangraphs)
-                   for r in xwalk.itertuples() if pd.notna(r.key_fangraphs)}
+def fetch_fangraphs_pitching(season: int) -> list[dict]:
+    """Una sola llamada: todos los pitchers de la liga con sus metricas."""
+    url = (f"{FG}?pos=all&stats=pit&lg=all&qual=0"
+           f"&season={season}&season1={season}"
+           f"&type=8&pageitems=3000&pagenum=1&month=0&team=0&ind=0")
+    raw = _get(url)
+    rows = []
+    for r in raw.get("data", []):
+        mid = r.get("xMLBAMID")
+        rows.append({
+            "mlbam": int(mid) if mid is not None else None,
+            "name": _strip(r.get("Name")),
+            "throws": r.get("Throws"),
+            "FIP": _f(r.get("FIP")), "WHIP": _f(r.get("WHIP")),
+            "xFIP": _f(r.get("xFIP")), "gmLI": _f(r.get("gmLI")),
+            "SV": _f(r.get("SV")), "IP": _f(r.get("IP")),
+        })
+    return rows
+
+
+def get_starter_metrics(rows: list[dict], mlbam_ids: list[int]) -> dict:
+    by_id = {r["mlbam"]: r for r in rows if r["mlbam"] is not None}
     out = {}
     for mid in mlbam_ids:
-        fg = fg_by_mlbam.get(mid)
-        out[mid] = None
-        if fg is not None:
-            row = df[df["IDfg"] == fg]
-            if not row.empty:
-                r = row.iloc[0]
-                out[mid] = {"FIP": round(float(r["FIP"]), 2),
-                            "WHIP": round(float(r["WHIP"]), 2),
-                            "xFIP": round(float(r["xFIP"]), 2)}
+        r = by_id.get(mid)
+        out[mid] = {"FIP": r["FIP"], "WHIP": r["WHIP"], "xFIP": r["xFIP"]} if r else None
     return out
 
 
-def get_top_closers(df, team_abbr: str) -> dict:
-    """Top 3 por gmLI (operativo) y por SV (referencia). Devuelve name + mlbam."""
-    import pandas as pd
-    from pybaseball import playerid_reverse_lookup
-    pen = df[df["Team"] == team_abbr].copy()
+def get_top_closers(rows: list[dict], team_pitcher_ids: set[int]) -> dict:
+    """Top 3 por gmLI (operativo) y por SV (referencia), entre los pitchers
+    del roster del equipo. Sin cruce de abreviaturas: se filtra por MLBAM ID."""
+    pen = [r for r in rows if r["mlbam"] in team_pitcher_ids]
 
-    def top3(col):
-        if pen.empty or col not in pen.columns:
-            return []
-        sub = pen.sort_values(col, ascending=False).head(3)
-        fg_ids = [str(int(i)) for i in sub["IDfg"]]
-        xwalk = playerid_reverse_lookup(fg_ids, key_type="fangraphs")
-        mlbam = {int(r.key_fangraphs): int(r.key_mlbam)
-                 for r in xwalk.itertuples() if pd.notna(r.key_mlbam)}
-        return [{"name": str(n), "mlbam": mlbam.get(int(fg))}
-                for n, fg in zip(sub["Name"], sub["IDfg"])]
+    def top3(key):
+        ranked = sorted([r for r in pen if r.get(key) is not None],
+                        key=lambda r: r[key], reverse=True)[:3]
+        return [{"name": r["name"], "mlbam": r["mlbam"], key: r[key]} for r in ranked]
 
     return {"by_gmLI": top3("gmLI"), "by_SV": top3("SV")}
 
@@ -169,9 +199,9 @@ def get_top_closers(df, team_abbr: str) -> dict:
 def fetch_team_wrcplus_split(team_abbr: str, vs_hand: str | None, asof: date) -> dict:
     """Debe devolver {'wrc_plus': float, 'pa': int, 'source': '20d'|'season'}.
     Ventana 20d -> guard 100 PA -> fallback temporada. Fuente: Splits
-    Leaderboards de FanGraphs (payload por capturar en la Fase 3).
+    Leaderboards de FanGraphs (mismo API moderno; payload por capturar en Fase 3).
     """
-    raise NotImplementedError("Pendiente: capturar payload del Splits Leaderboard")
+    raise NotImplementedError("Pendiente Fase 3: Splits Leaderboard de FanGraphs")
 
 
 # ===========================================================================
@@ -199,7 +229,7 @@ def evaluate_pick(pick: dict, opp: dict) -> dict:
 
 
 # ===========================================================================
-# ORQUESTADOR — valida UN juego (acota costo y memoria en free tier)
+# ORQUESTADOR — valida UN juego
 # ===========================================================================
 def validate_game(game: dict, season: int, asof: date) -> dict:
     a, h = game["away"], game["home"]
@@ -217,20 +247,18 @@ def validate_game(game: dict, season: int, asof: date) -> dict:
         a["hand"] = h["hand"] = None
         res["capas"]["manos"] = f"error: {e}"
 
-    # FanGraphs: una sola jalada de pitching_stats para todo el juego
-    df = None
+    # FanGraphs: una sola jalada (API moderno)
+    rows = None
     try:
-        from pybaseball import pitching_stats, cache
-        cache.enable()
-        df = pitching_stats(season, season, qual=0)
-        res["capas"]["fangraphs_pitching"] = f"ok ({len(df)} filas, {len(df.columns)} cols)"
+        rows = fetch_fangraphs_pitching(season)
+        res["capas"]["fangraphs_pitching"] = f"ok ({len(rows)} pitchers)"
     except Exception as e:
         res["capas"]["fangraphs_pitching"] = f"error: {type(e).__name__}: {e}"
 
     # 2B — abridores
-    if df is not None:
+    if rows is not None:
         try:
-            m = get_starter_metrics(df, [a["sp_id"], h["sp_id"]])
+            m = get_starter_metrics(rows, [a["sp_id"], h["sp_id"]])
             a["metrics"] = m.get(a["sp_id"]); h["metrics"] = m.get(h["sp_id"])
             res["abridores_metrics"] = {a["abbr"]: a["metrics"], h["abbr"]: h["metrics"]}
             res["capas"]["abridores"] = "ok"
@@ -238,10 +266,11 @@ def validate_game(game: dict, season: int, asof: date) -> dict:
             res["capas"]["abridores"] = f"error: {type(e).__name__}: {e}"
 
     # 2C — cerradores + fatiga
-    if df is not None:
+    if rows is not None:
         for team in (a, h):
             try:
-                closers = get_top_closers(df, team["abbr"])
+                pen_ids = get_team_pitcher_ids(team["id"], season)
+                closers = get_top_closers(rows, pen_ids)
                 ids = [c["mlbam"] for c in closers["by_gmLI"] if c["mlbam"]]
                 team["bullpen"] = bullpen_status(ids, season, asof)
                 team["bullpen"]["listas"] = closers

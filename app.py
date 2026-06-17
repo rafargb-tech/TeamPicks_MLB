@@ -1,5 +1,5 @@
 """
-TeamPicks_MLB — App de validacion (v0.1.0)
+TeamPicks_MLB — App de validacion (v0.2.0)
 
 Rutas:
   GET /                        -> health check
@@ -20,7 +20,7 @@ app = Flask(__name__)
 def health():
     return jsonify({"status": "ok",
                     "servicio": "TeamPicks_MLB validador",
-                    "version": "0.1.0"})
+                    "version": "0.2.0"})
 
 
 @app.get("/validar")
