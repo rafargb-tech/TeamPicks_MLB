@@ -1,0 +1,6 @@
+# TeamPicks_MLB — dependencias minimas para la prueba (v0.1.0)
+# Sin pin de version a proposito: dejamos que el primer build resuelva
+# las ultimas compatibles y DESPUES las fijamos con lo que realmente quedo.
+Flask
+gunicorn
+pybaseball
