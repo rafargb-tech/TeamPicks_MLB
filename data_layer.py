@@ -1,10 +1,14 @@
 """
 TeamPicks_MLB — Capa de datos (modulo)
-Version: 0.2.0
+Version: 0.3.0
 
 Estrategia: Moneyline / desequilibrio pitcheo-ofensiva.
 Este modulo NO imprime: devuelve estructuras para que app.py las sirva como JSON.
 
+CAMBIO v0.3.0: wRC+ por mano implementado (fallback de temporada via API
+principal con month=13/14 + team=0,ts). Primario de 20 dias pendiente (Fase 3b).
+CAMBIO v0.2.1: R3 (fatiga por conteo) pasa a modo ESTRICTO via
+FATIGUE_R3_RECENCY_DAYS: solo aplica si la salida pesada fue ayer.
 CAMBIO v0.2.0: se elimino pybaseball. Toda la data de FanGraphs se obtiene
 del API moderno JSON (el endpoint legacy .aspx devuelve 403). El API moderno
 incluye xMLBAMID, asi que ya no hace falta crosswalk de IDs.
@@ -30,14 +34,23 @@ WRC_WEAK_CUT     = 105     # ofensiva debil     si wRC+ < 105
 
 WRC_WINDOW_DAYS  = 20      # ventana ofensiva
 WRC_MIN_PA       = 100     # guard: PA minimas vs esa mano; si menos -> fallback temporada
+MONTH_VS_L       = 13      # "month" en API FanGraphs = split vs LHP
+MONTH_VS_R       = 14      # "month" en API FanGraphs = split vs RHP
 
 FATIGUE_WINDOW           = 5    # ventana de la regla 2
 FATIGUE_APPEARANCES      = 3    # fatigado si lanzo en >=3 de los ultimos 5 dias
 FATIGUE_MAX_PITCHES_LAST = 30   # fatigado si >30 pitcheos en su ultima salida
+FATIGUE_R3_RECENCY_DAYS  = 1    # R3 solo aplica si esa salida pesada fue dentro
+                                # de N dias. ESTRICTO=1 (solo ayer). [DOCUMENTAR]
 CLOSERS_NEEDED_AVAILABLE = 2    # aprueba si >=2 de 3 cerradores estan listos
 
 MLB = "https://statsapi.mlb.com/api/v1"
 FG  = "https://www.fangraphs.com/api/leaders/major-league/data"
+
+# Abreviaturas que difieren entre MLB Stats API y FanGraphs
+MLB_TO_FG_ABBR = {"AZ": "ARI", "CWS": "CHW", "KC": "KCR", "SD": "SDP",
+                  "SF": "SFG", "TB": "TBR", "WSH": "WSN",
+                  "OAK": "ATH", "SAC": "ATH"}
 UA  = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                       "AppleWebKit/537.36 (KHTML, like Gecko) "
                       "Chrome/120 Safari/537.36")}
@@ -121,9 +134,13 @@ def is_fatigued(logs: list[dict], asof: date) -> tuple[bool, list[str]]:
     pitches = {d["date"]: d["pitches"] for d in logs}
     reasons: list[str] = []
 
+    # R3 (modo ESTRICTO): solo cuenta si la salida pesada fue reciente.
+    # Una sola salida de +30 pitcheos cansa el dia siguiente; a 2+ dias ya
+    # esta disponible. La carga acumulada la cubren R1/R2.
     last = prior[-1]
-    if pitches.get(last, 0) > FATIGUE_MAX_PITCHES_LAST:
-        reasons.append(f"R3: {pitches[last]} pitcheos en ultima salida ({last})")
+    if (pitches.get(last, 0) > FATIGUE_MAX_PITCHES_LAST
+            and last >= asof - timedelta(days=FATIGUE_R3_RECENCY_DAYS)):
+        reasons.append(f"R3: {pitches[last]} pitcheos el {last}")
 
     s = set(prior)
     if (asof - timedelta(days=1)) in s and (asof - timedelta(days=2)) in s:
@@ -196,12 +213,37 @@ def get_top_closers(rows: list[dict], team_pitcher_ids: set[int]) -> dict:
 # ===========================================================================
 # CAPA 4 — wRC+ DE EQUIPO POR MANO   [STUB — Fase 3]
 # ===========================================================================
-def fetch_team_wrcplus_split(team_abbr: str, vs_hand: str | None, asof: date) -> dict:
-    """Debe devolver {'wrc_plus': float, 'pa': int, 'source': '20d'|'season'}.
-    Ventana 20d -> guard 100 PA -> fallback temporada. Fuente: Splits
-    Leaderboards de FanGraphs (mismo API moderno; payload por capturar en Fase 3).
+def _team_wrc_by_hand(season: int, vs_hand: str) -> dict:
+    """{fg_abbr: {'wrc_plus','pa'}} de TODOS los equipos vs una mano (temporada)."""
+    month = MONTH_VS_L if vs_hand == "L" else MONTH_VS_R
+    url = (f"{FG}?pos=all&stats=bat&lg=all&qual=0&type=8"
+           f"&season={season}&season1={season}&ind=0&pageitems=2000"
+           f"&month={month}&team=0,ts")
+    raw = _get(url)
+    out = {}
+    for r in raw.get("data", []):
+        out[_strip(r.get("Team"))] = {"wrc_plus": _f(r.get("wRC+")),
+                                      "pa": int(r.get("PA") or 0)}
+    return out
+
+
+def fetch_team_wrcplus_split(team_abbr: str, vs_hand: str | None,
+                             asof: date, season: int) -> dict | None:
+    """wRC+ del equipo vs la mano del abridor rival.
+
+    PRIMARIO (ventana 20d por mano): PENDIENTE — necesita el endpoint Splits
+        Leaderboards (Fase 3b). En cuanto exista: si PA>=100 se usa, source='20d'.
+    FALLBACK (temporada por mano): LISTO via API principal, source='season'.
+
+    Devuelve {'wrc_plus','pa','source'} o None.
     """
-    raise NotImplementedError("Pendiente Fase 3: Splits Leaderboard de FanGraphs")
+    if vs_hand not in ("L", "R"):
+        return None
+    fg = MLB_TO_FG_ABBR.get(team_abbr, team_abbr)
+    row = _team_wrc_by_hand(season, vs_hand).get(fg)
+    if not row or row["wrc_plus"] is None:
+        return None
+    return {"wrc_plus": row["wrc_plus"], "pa": row["pa"], "source": "season"}
 
 
 # ===========================================================================
@@ -279,13 +321,16 @@ def validate_game(game: dict, season: int, asof: date) -> dict:
         res["bullpen"] = {a["abbr"]: a.get("bullpen"), h["abbr"]: h.get("bullpen")}
         res["capas"]["cerradores"] = "ok"
 
-    # CAPA 4 — wRC+ (STUB): ofensiva de cada uno vs la mano del abridor rival
-    for off, vs in ((a, h), (h, a)):
-        try:
-            off["wrc"] = fetch_team_wrcplus_split(off["abbr"], vs.get("hand"), asof)
-        except NotImplementedError:
-            off["wrc"] = None
-    res["capas"]["wrc_plus"] = "STUB (pendiente Fase 3)"
+    # CAPA 4 — wRC+ por mano: ofensiva de cada uno vs la mano del abridor rival
+    # (fallback de temporada LISTO; primario de 20 dias pendiente Fase 3b)
+    try:
+        a["wrc"] = fetch_team_wrcplus_split(a["abbr"], h.get("hand"), asof, season)
+        h["wrc"] = fetch_team_wrcplus_split(h["abbr"], a.get("hand"), asof, season)
+        res["wrc_plus"] = {a["abbr"]: a["wrc"], h["abbr"]: h["wrc"]}
+        res["capas"]["wrc_plus"] = "ok (fallback temporada; primario 20d pendiente)"
+    except Exception as e:
+        a["wrc"] = h["wrc"] = None
+        res["capas"]["wrc_plus"] = f"error: {type(e).__name__}: {e}"
 
     # CAPA 5 — compuerta (auto-excluyente: a lo mas un lado pasa)
     if a.get("metrics") is not None or h.get("metrics") is not None:
