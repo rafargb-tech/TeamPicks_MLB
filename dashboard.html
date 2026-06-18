@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TeamPicks · MLB</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#0D1521; --panel:#15202E; --panel2:#1C2A3A; --line:#293a4e;
+    --num:#ECE8DC; --muted:#8493a8; --dim:#5c6c81;
+    --amber:#FFB02E; --amber-soft:rgba(255,176,46,.12); --amber-line:rgba(255,176,46,.45);
+    --green:#46C08B; --clay:#D17A4E; --red:#E0664E;
+    --disp:"Saira Condensed",sans-serif; --mono:"JetBrains Mono",monospace; --ui:"Inter",sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink);color:var(--num);font-family:var(--ui);
+       font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  a{color:inherit}
+  .wrap{max-width:920px;margin:0 auto;padding:0 18px 64px}
+
+  /* ---- header: tira de marcador ---- */
+  header{position:sticky;top:0;z-index:5;background:linear-gradient(180deg,var(--ink) 70%,rgba(13,21,33,.0));
+         padding:18px 0 10px;margin-bottom:6px}
+  .top{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .brand{font-family:var(--disp);font-weight:700;letter-spacing:.06em;font-size:24px;line-height:1}
+  .brand b{color:var(--amber)}
+  .brand span{color:var(--dim);font-weight:500;font-size:13px;letter-spacing:.22em;display:block;margin-top:2px}
+  .spacer{flex:1}
+  .datectl{display:flex;align-items:center;gap:6px}
+  .datectl button,.refresh{background:var(--panel);border:1px solid var(--line);color:var(--num);
+       font-family:var(--mono);font-size:14px;border-radius:8px;padding:7px 10px;cursor:pointer}
+  .datectl button:hover,.refresh:hover{border-color:var(--amber-line)}
+  input[type=date]{background:var(--panel);border:1px solid var(--line);color:var(--num);
+       font-family:var(--mono);font-size:14px;border-radius:8px;padding:6px 8px}
+  .ver{font-family:var(--mono);font-size:11px;color:var(--dim);border:1px solid var(--line);
+       border-radius:999px;padding:2px 8px}
+  .summary{font-family:var(--mono);font-size:13px;color:var(--muted);margin-top:12px;
+       display:flex;gap:18px;flex-wrap:wrap}
+  .summary b{color:var(--num);font-weight:700}
+  .summary .hot b{color:var(--amber)}
+
+  /* ---- section eyebrow ---- */
+  .eyebrow{font-family:var(--disp);font-weight:600;letter-spacing:.18em;font-size:13px;
+       color:var(--muted);text-transform:uppercase;margin:30px 0 12px;display:flex;align-items:center;gap:10px}
+  .eyebrow::after{content:"";flex:1;height:1px;background:var(--line)}
+
+  /* ---- pick card (panel encendido) ---- */
+  .pick{background:linear-gradient(180deg,var(--amber-soft),transparent 60%),var(--panel);
+        border:1px solid var(--amber-line);border-left:4px solid var(--amber);
+        border-radius:14px;padding:18px 20px;margin-bottom:14px;
+        box-shadow:0 0 0 1px rgba(255,176,46,.05),0 14px 40px -22px rgba(255,176,46,.5)}
+  .pick .kick{font-family:var(--disp);font-weight:700;letter-spacing:.18em;color:var(--amber);
+        font-size:13px;text-transform:uppercase}
+  .pick .row1{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin:4px 0 2px}
+  .pick .team{font-family:var(--disp);font-weight:700;font-size:46px;line-height:.95;letter-spacing:.01em}
+  .pick .match{font-family:var(--mono);color:var(--muted);font-size:14px}
+  .pick .sp{color:var(--dim);font-size:13px;margin-bottom:14px}
+  .odds{margin-left:auto;text-align:right}
+  .odds .c{font-family:var(--mono);font-weight:700;font-size:34px;color:var(--amber);line-height:1}
+  .odds .src{font-family:var(--mono);font-size:11px;color:var(--muted)}
+
+  /* 7 focos = la compuerta */
+  .bulbs{display:flex;gap:7px;margin:6px 0 14px;flex-wrap:wrap}
+  .bulb{width:13px;height:13px;border-radius:50%;background:#0c1722;border:1px solid var(--line);position:relative}
+  .bulb.on{background:var(--amber);border-color:var(--amber);box-shadow:0 0 9px var(--amber-line)}
+  .bulb.off{background:#241a17;border-color:#3a2a22}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 18px;
+        font-family:var(--mono);font-size:13px}
+  .stats .k{color:var(--dim)} .stats .v{color:var(--num)}
+
+  /* ---- sin jugada ---- */
+  .empty{background:var(--panel);border:1px dashed var(--line);border-radius:14px;
+        padding:34px 20px;text-align:center}
+  .empty h2{font-family:var(--disp);font-weight:700;letter-spacing:.12em;font-size:30px;
+        color:var(--dim);margin:0 0 6px}
+  .empty p{color:var(--muted);margin:0;font-size:14px}
+
+  /* ---- evaluados ---- */
+  .game{display:grid;grid-template-columns:64px 1fr auto;gap:12px;align-items:center;
+        background:var(--panel);border:1px solid var(--line);border-radius:11px;
+        padding:11px 14px;margin-bottom:8px}
+  .game .t{font-family:var(--mono);font-size:12px;color:var(--muted)}
+  .game .m{font-family:var(--disp);font-weight:600;font-size:19px;letter-spacing:.02em}
+  .game .verd{font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:1px}
+  .game .verd .pend{color:var(--clay)}
+  .lines{font-family:var(--mono);font-size:13px;text-align:right;white-space:nowrap}
+  .lines .o{color:var(--num)} .lines .o.lo{color:var(--dim)}
+  .lines small{color:var(--dim)}
+
+  /* ---- omitidos ---- */
+  .omit{display:flex;gap:8px;flex-wrap:wrap}
+  .chip{font-family:var(--mono);font-size:12px;color:var(--muted);background:var(--panel);
+        border:1px solid var(--line);border-radius:999px;padding:4px 11px}
+  .chip i{font-style:normal;color:var(--dim)}
+  .chip.live i{color:var(--green)} .chip.post i{color:var(--clay)}
+
+  footer{margin-top:34px;border-top:1px solid var(--line);padding-top:14px;
+        font-family:var(--mono);font-size:11px;color:var(--dim);line-height:1.7}
+  .toggle{font-family:var(--ui);font-size:13px;color:var(--muted);display:inline-flex;
+        align-items:center;gap:7px;cursor:pointer;margin-top:10px}
+  .toggle input{accent-color:var(--amber)}
+  .msg{font-family:var(--mono);font-size:13px;color:var(--muted);padding:24px 2px}
+  .msg.err{color:var(--red)}
+  @media(max-width:560px){
+    .pick .team{font-size:38px}.odds .c{font-size:28px}
+    .game{grid-template-columns:54px 1fr;}.lines{grid-column:1/-1;text-align:left;margin-top:4px}
+  }
+  @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="top">
+      <div class="brand">TEAM<b>PICKS</b><span>MLB · MONEYLINE</span></div>
+      <div class="spacer"></div>
+      <div class="datectl">
+        <button id="prev" aria-label="Día anterior">◀</button>
+        <input type="date" id="date">
+        <button id="next" aria-label="Día siguiente">▶</button>
+        <button class="refresh" id="refresh" aria-label="Refrescar">↻</button>
+      </div>
+      <span class="ver" id="ver">—</span>
+    </div>
+    <div class="summary" id="summary"></div>
+  </header>
+
+  <main id="main"><div class="msg" id="status">Cargando…</div></main>
+
+  <label class="toggle"><input type="checkbox" id="allodds"> Mostrar cuotas de todos los juegos (usa 1 crédito)</label>
+
+  <footer id="notes"></footer>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const COND = {
+  "abridor_propio_FIP<3.50":"SP propio FIP<3.50",
+  "abridor_propio_WHIP<1.50":"SP propio WHIP<1.50",
+  "abridor_rival_FIP>3.50":"SP rival FIP>3.50",
+  "abridor_rival_WHIP>=1.50":"SP rival WHIP≥1.50",
+  "ofensiva_propia_wRC+>105":"Ofensiva propia wRC+>105",
+  "ofensiva_rival_wRC+<105":"Ofensiva rival wRC+<105",
+  "bullpen_>=2_listos":"Bullpen ≥2 listos",
+};
+const localTime = iso => { try{ return new Date(iso)
+  .toLocaleTimeString([], {hour:'numeric', minute:'2-digit'}); }catch(e){ return ''; } };
+const esc = s => (s==null?'':String(s)).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+function bulbs(cond){
+  return '<div class="bulbs">' + Object.keys(COND).map(k=>{
+    const v = cond ? cond[k] : null;
+    const cls = v===true?'on':(v===false?'off':'');
+    return `<span class="bulb ${cls}" title="${esc(COND[k])}: ${v===true?'sí':v===false?'no':'—'}"></span>`;
+  }).join('') + '</div>';
+}
+
+function pickCard(p){
+  const opp = Object.keys(p.abridores_metrics||{}).find(a=>a!==p.pick) || '';
+  const m = p.abridores_metrics||{}, w = p.wrc_plus||{};
+  const mp = m[p.pick]||{}, mo = m[opp]||{}, wp = w[p.pick]||{}, wo = w[opp]||{};
+  const c = p.cuota;
+  const odds = c ? `<div class="odds"><div class="c">${c.cuota.toFixed(2)}</div>
+       <div class="src">${esc(c.casa)} · ${c.n_casas} casas</div></div>` :
+       `<div class="odds"><div class="src">cuota n/d</div></div>`;
+  return `<div class="pick">
+    <div class="kick">▲ Apostar</div>
+    <div class="row1">
+      <div class="team">${esc(p.pick)}</div>
+      <div><div class="match">${esc(p.matchup)}</div></div>
+      ${odds}
+    </div>
+    <div class="sp">${esc(p.abridores)}</div>
+    ${bulbs(p.condiciones)}
+    <div class="stats">
+      <div><span class="k">${esc(p.pick)} SP</span> <span class="v">FIP ${mp.FIP??'–'} · WHIP ${mp.WHIP??'–'}</span></div>
+      <div><span class="k">${esc(opp)} SP</span> <span class="v">FIP ${mo.FIP??'–'} · WHIP ${mo.WHIP??'–'}</span></div>
+      <div><span class="k">${esc(p.pick)} wRC+</span> <span class="v">${wp.wrc_plus??'–'} <small>(${esc(wp.source||'')})</small></span></div>
+      <div><span class="k">${esc(opp)} wRC+</span> <span class="v">${wo.wrc_plus??'–'} <small>(${esc(wo.source||'')})</small></span></div>
+    </div>
+  </div>`;
+}
+
+function gameRow(g){
+  const verds = g.veredictos||{};
+  const ab = Object.keys(verds);
+  const vtxt = ab.map(t=>{
+    const v=verds[t]; const pend=/PENDIENTE/.test(v);
+    return `${esc(t)} <span class="${pend?'pend':''}">${pend?'pend.':'no'}</span>`;
+  }).join('  ·  ');
+  let lines='';
+  if(g.cuotas){
+    lines = '<div class="lines">' + ab.map(t=>{
+      const o=g.cuotas[t]; if(!o) return `${esc(t)} <small>n/d</small>`;
+      const lo = o.cuota<1.7?'lo':'';
+      return `${esc(t)} <span class="o ${lo}">${o.cuota.toFixed(2)}</span>`;
+    }).join('<br>') + '</div>';
+  }
+  return `<div class="game">
+    <div class="t">${localTime(g.inicio)}</div>
+    <div><div class="m">${esc(g.matchup)}</div><div class="verd">${vtxt}</div></div>
+    ${lines||'<div></div>'}
+  </div>`;
+}
+
+function render(d){
+  $('#ver').textContent = 'v'+(window.__ver||'1.0');
+  // summary
+  $('#summary').innerHTML =
+    `<span><b>${d.juegos_totales}</b> juegos</span>
+     <span><b>${d.evaluados_apostables}</b> apostables</span>
+     <span class="hot"><b>${d.total_picks}</b> ${d.total_picks===1?'jugada':'jugadas'}</span>`;
+  let html = '';
+  // picks
+  html += `<div class="eyebrow">Jugadas de hoy</div>`;
+  if(d.picks && d.picks.length){
+    html += d.picks.map(pickCard).join('');
+  } else {
+    html += `<div class="empty"><h2>Sin jugada hoy</h2>
+      <p>El sistema revisó ${d.evaluados_apostables} ${d.evaluados_apostables===1?'juego apostable':'juegos apostables'} y ninguno cumple las 7 condiciones. Pasar es una decisión válida.</p></div>`;
+  }
+  // evaluados
+  if(d.evaluados && d.evaluados.length){
+    html += `<div class="eyebrow">Evaluados</div>`;
+    html += d.evaluados.map(gameRow).join('');
+  }
+  // omitidos
+  if(d.omitidos_ya_empezados && d.omitidos_ya_empezados.length){
+    html += `<div class="eyebrow">Fuera (no apostables)</div><div class="omit">`;
+    html += d.omitidos_ya_empezados.map(o=>{
+      const st=(o.estado||'').toLowerCase();
+      const cls = st.includes('progress')?'live':(st.includes('postpon')?'post':'');
+      return `<span class="chip ${cls}">${esc(o.matchup)} <i>${esc(o.estado)}</i></span>`;
+    }).join('') + `</div>`;
+  }
+  $('#main').innerHTML = html;
+  // notas
+  const notes=[];
+  if(d.nota_wrc) notes.push(esc(d.nota_wrc));
+  if(d.nota_cuotas) notes.push(esc(d.nota_cuotas));
+  if(d.errores) notes.push('⚠ '+esc(JSON.stringify(d.errores)));
+  $('#notes').innerHTML = notes.join('<br>');
+}
+
+async function load(){
+  const date = $('#date').value;
+  const all = $('#allodds').checked ? '&con_cuotas=1' : '';
+  $('#status') && ($('#main').innerHTML = '<div class="msg">Cargando slate…</div>');
+  try{
+    const [v, r] = await Promise.all([
+      fetch('/health').then(x=>x.json()).catch(()=>({})),
+      fetch(`/picks?fecha=${date}${all}`).then(x=>x.json())
+    ]);
+    window.__ver = v.version || '1.0';
+    if(r.error){ $('#main').innerHTML = `<div class="msg err">${esc(r.error)}</div>`; return; }
+    render(r);
+  }catch(e){
+    $('#main').innerHTML = `<div class="msg err">No se pudo cargar: ${esc(e.message)}. Reintenta con ↻.</div>`;
+  }
+}
+
+function shift(days){
+  const dt = new Date($('#date').value+'T12:00:00');
+  dt.setDate(dt.getDate()+days);
+  $('#date').value = dt.toISOString().slice(0,10);
+  load();
+}
+$('#date').value = new Date().toISOString().slice(0,10);
+$('#prev').onclick=()=>shift(-1);
+$('#next').onclick=()=>shift(1);
+$('#refresh').onclick=load;
+$('#date').onchange=load;
+$('#allodds').onchange=load;
+load();
+</script>
+</body>
+</html>

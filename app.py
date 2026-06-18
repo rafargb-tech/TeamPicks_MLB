@@ -1,20 +1,24 @@
 """
-TeamPicks_MLB — App (v0.7.0)
+TeamPicks_MLB — App (v1.0.0)
 
 Rutas:
-  GET /                        -> health check
+  GET /                        -> DASHBOARD (capa de visualizacion)
+  GET /health                  -> health check JSON (version)
   GET /picks?fecha=YYYY-MM-DD  -> EL PRODUCTO: escanea el slate completo y
                                   devuelve los picks del dia (default = hoy)
+                                  (flag con_cuotas=1 anexa cuotas a todos)
   GET /validar?fecha=YYYY-MM-DD&equipo=NYM
-                               (flag con_cuotas=1 anexa cuotas)
                                   -> debug de UN juego con detalle completo
                                   (bullpen siempre evaluado)
 """
+import os
 from datetime import date
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 import data_layer as dl
 
 app = Flask(__name__)
+VERSION = "1.0.0"
+HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def _parse_day(fecha):
@@ -22,10 +26,19 @@ def _parse_day(fecha):
 
 
 @app.get("/")
+def dashboard():
+    try:
+        with open(os.path.join(HERE, "dashboard.html"), encoding="utf-8") as f:
+            return Response(f.read(), mimetype="text/html")
+    except FileNotFoundError:
+        return jsonify({"error": "dashboard.html no encontrado en el repo"}), 404
+
+
+@app.get("/health")
 def health():
     return jsonify({"status": "ok",
                     "servicio": "TeamPicks_MLB",
-                    "version": "0.7.0"})
+                    "version": VERSION})
 
 
 @app.get("/picks")
