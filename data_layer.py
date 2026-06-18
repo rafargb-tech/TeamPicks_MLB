@@ -1,10 +1,13 @@
 """
 TeamPicks_MLB — Capa de datos (modulo)
-Version: 0.4.0
+Version: 0.5.0
 
 Estrategia: Moneyline / desequilibrio pitcheo-ofensiva.
 Este modulo NO imprime: devuelve estructuras para que app.py las sirva como JSON.
 
+CAMBIO v0.5.0: scan_slate() filtra los juegos que ya empezaron/terminaron
+(solo evalua estado "Preview"); reporta los omitidos. Solo muestra picks de
+juegos aun apostables.
 CAMBIO v0.4.0: scan_slate() escanea el slate completo y devuelve los picks del
 dia. FanGraphs se pre-carga una vez por slate; el bullpen se evalua de forma
 perezosa (solo para lados que ya pasaron lo demas).
@@ -90,11 +93,25 @@ def get_slate(day: date) -> list[dict]:
                 return {"name": t["name"], "abbr": t.get("abbreviation"),
                         "id": t.get("id"),
                         "sp_id": sp.get("id"), "sp_name": sp.get("fullName")}
+            st = g.get("status", {})
             games.append({"gamePk": g["gamePk"],
                           "fecha": g.get("officialDate", day.isoformat()),
+                          "estado": st.get("abstractGameState"),
+                          "estado_detalle": st.get("detailedState"),
+                          "inicio": g.get("gameDate"),
                           "away": side(g["teams"]["away"]),
                           "home": side(g["teams"]["home"])})
     return games
+
+
+# Estados detallados en los que un juego NO es apostable aunque figure "Preview"
+NO_APOSTABLE = {"Postponed", "Cancelled", "Suspended"}
+
+
+def es_apostable(game: dict) -> bool:
+    """Apostable = pre-juego (aun no lanza) y no postpuesto/cancelado."""
+    return (game.get("estado") == "Preview"
+            and game.get("estado_detalle") not in NO_APOSTABLE)
 
 
 def get_pitch_hand(pid: int | None) -> str | None:
@@ -376,23 +393,30 @@ def validate_game(game, season, asof, rows=None, wrc_tables=None,
 # ===========================================================================
 # SCAN DEL SLATE COMPLETO — el producto: picks del dia
 # ===========================================================================
-def scan_slate(day: date) -> dict:
+def scan_slate(day: date, incluir_empezados: bool = False) -> dict:
     season = day.year
     slate = get_slate(day)
 
+    # Separar apostables (pre-juego) de los que ya empezaron / terminaron
+    omitidos = [{"matchup": f'{g["away"]["abbr"]} @ {g["home"]["abbr"]}',
+                 "estado": g.get("estado_detalle")}
+                for g in slate if not es_apostable(g)]
+    a_evaluar = slate if incluir_empezados else [g for g in slate if es_apostable(g)]
+
     # Pre-carga FanGraphs UNA sola vez para todo el slate
     rows, wrc_tables, errores = None, {}, []
-    try:
-        rows = fetch_fangraphs_pitching(season)
-    except Exception as e:
-        errores.append(f"fangraphs_pitching: {e}")
-    try:
-        wrc_tables = fetch_team_wrc_tables(season)
-    except Exception as e:
-        errores.append(f"wrc_tables: {e}")
+    if a_evaluar:
+        try:
+            rows = fetch_fangraphs_pitching(season)
+        except Exception as e:
+            errores.append(f"fangraphs_pitching: {e}")
+        try:
+            wrc_tables = fetch_team_wrc_tables(season)
+        except Exception as e:
+            errores.append(f"wrc_tables: {e}")
 
     picks, evaluados = [], []
-    for g in slate:
+    for g in a_evaluar:
         try:
             r = validate_game(g, season, day, rows=rows, wrc_tables=wrc_tables,
                               lazy_bullpen=True)
@@ -400,16 +424,20 @@ def scan_slate(day: date) -> dict:
             evaluados.append({"matchup": f'{g["away"]["abbr"]} @ {g["home"]["abbr"]}',
                               "error": str(e)})
             continue
-        evaluados.append({"matchup": r["matchup"],
+        evaluados.append({"matchup": r["matchup"], "inicio": g.get("inicio"),
                           "veredictos": {k: v["verdict"]
                                          for k, v in r.get("compuerta", {}).items()}})
         for abbr, v in r.get("compuerta", {}).items():
             if v["verdict"].startswith("PICK"):
                 picks.append({"matchup": r["matchup"], "pick": abbr,
+                              "inicio": g.get("inicio"),
                               "abridores": r["abridores"],
                               "condiciones": v["condiciones"]})
 
-    return {"fecha": day.isoformat(), "juegos": len(slate),
+    return {"fecha": day.isoformat(),
+            "juegos_totales": len(slate),
+            "evaluados_apostables": len(evaluados),
+            "omitidos_ya_empezados": omitidos,
             "total_picks": len(picks), "picks": picks,
             "evaluados": evaluados,
             "errores": errores or None,

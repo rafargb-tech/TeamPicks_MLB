@@ -1,5 +1,5 @@
 """
-TeamPicks_MLB — App (v0.4.0)
+TeamPicks_MLB — App (v0.5.0)
 
 Rutas:
   GET /                        -> health check
@@ -24,7 +24,7 @@ def _parse_day(fecha):
 def health():
     return jsonify({"status": "ok",
                     "servicio": "TeamPicks_MLB",
-                    "version": "0.4.0"})
+                    "version": "0.5.0"})
 
 
 @app.get("/picks")
@@ -33,7 +33,8 @@ def picks():
         day = _parse_day(request.args.get("fecha"))
     except ValueError:
         return jsonify({"error": "fecha invalida, usa YYYY-MM-DD"}), 400
-    return jsonify(dl.scan_slate(day))
+    incluir = request.args.get("incluir_empezados") in ("1", "true", "si")
+    return jsonify(dl.scan_slate(day, incluir_empezados=incluir))
 
 
 @app.get("/validar")
