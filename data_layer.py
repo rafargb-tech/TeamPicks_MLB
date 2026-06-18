@@ -1,10 +1,13 @@
 """
 TeamPicks_MLB — Capa de datos (modulo)
-Version: 0.5.0
+Version: 0.6.0
 
 Estrategia: Moneyline / desequilibrio pitcheo-ofensiva.
 Este modulo NO imprime: devuelve estructuras para que app.py las sirva como JSON.
 
+CAMBIO v0.6.0: wRC+ PRIMARIO de 20 dias por mano implementado (endpoint Splits
+Leaderboards), con guard de 100 PA y fallback a temporada. Temporada y 20d salen
+del MISMO endpoint (consistencia). Fase 3b completa.
 CAMBIO v0.5.0: scan_slate() filtra los juegos que ya empezaron/terminaron
 (solo evalua estado "Preview"); reporta los omitidos. Solo muestra picks de
 juegos aun apostables.
@@ -40,8 +43,8 @@ WRC_WEAK_CUT     = 105     # ofensiva debil     si wRC+ < 105
 
 WRC_WINDOW_DAYS  = 20      # ventana ofensiva
 WRC_MIN_PA       = 100     # guard: PA minimas vs esa mano; si menos -> fallback temporada
-MONTH_VS_L       = 13      # "month" en API FanGraphs = split vs LHP
-MONTH_VS_R       = 14      # "month" en API FanGraphs = split vs RHP
+SPLIT_VS_L       = 1       # strSplitArr en Splits Leaderboards = vs LHP
+SPLIT_VS_R       = 2       # strSplitArr en Splits Leaderboards = vs RHP
 
 FATIGUE_WINDOW           = 5    # ventana de la regla 2
 FATIGUE_APPEARANCES      = 3    # fatigado si lanzo en >=3 de los ultimos 5 dias
@@ -52,6 +55,7 @@ CLOSERS_NEEDED_AVAILABLE = 2    # aprueba si >=2 de 3 cerradores estan listos
 
 MLB = "https://statsapi.mlb.com/api/v1"
 FG  = "https://www.fangraphs.com/api/leaders/major-league/data"
+FG_SPLITS = "https://www.fangraphs.com/api/leaders/splits/splits-leaders"
 
 # Abreviaturas que difieren entre MLB Stats API y FanGraphs
 MLB_TO_FG_ABBR = {"AZ": "ARI", "CWS": "CHW", "KC": "KCR", "SD": "SDP",
@@ -231,44 +235,64 @@ def get_top_closers(rows: list[dict], team_pitcher_ids: set[int]) -> dict:
 
 
 # ===========================================================================
-# CAPA 4 — wRC+ DE EQUIPO POR MANO  (fallback temporada; primario 20d = Fase 3b)
+# CAPA 4 — wRC+ DE EQUIPO POR MANO  (primario 20d con guard; fallback temporada)
+# Ambos del mismo endpoint: Splits Leaderboards de FanGraphs.
+#   strSplitArr=[1] = vs LHP ; [2] = vs RHP ; strType=2 trae wRC+ ; team-level.
 # ===========================================================================
-def _team_wrc_by_hand(season: int, vs_hand: str) -> dict:
-    """{fg_abbr: {'wrc_plus','pa'}} de TODOS los equipos vs una mano (temporada)."""
-    month = MONTH_VS_L if vs_hand == "L" else MONTH_VS_R
-    url = (f"{FG}?pos=all&stats=bat&lg=all&qual=0&type=8"
-           f"&season={season}&season1={season}&ind=0&pageitems=2000"
-           f"&month={month}&team=0,ts")
-    raw = _get(url)
+def _splits_team_wrc(vs_hand: str, start: str, end: str) -> dict:
+    """{fg_abbr: {'wrc_plus','pa'}} de TODOS los equipos vs una mano, en un
+    rango de fechas. Fuente: Splits Leaderboards (POST)."""
+    code = SPLIT_VS_L if vs_hand == "L" else SPLIT_VS_R
+    body = {"strPlayerId": "all", "strSplitArr": [code], "strGroup": "season",
+            "strPosition": "B", "strType": "2",
+            "strStartDate": start, "strEndDate": end,
+            "strSplitTeams": False, "dctFilters": [], "strStatType": "team",
+            "strAutoPt": "false", "arrPlayerId": [],
+            "strSplitArrPitch": [], "strSplitArrTeam": []}
+    req = urllib.request.Request(
+        FG_SPLITS, data=json.dumps(body).encode(),
+        headers={**UA, "Content-Type": "application/json"}, method="POST")
+    d = json.load(urllib.request.urlopen(req, timeout=30))
+    k = d.get("k", [])
+    if "wRC+" not in k:
+        return {}
+    iT, iPA, iW = k.index("TeamNameAbb"), k.index("PA"), k.index("wRC+")
     out = {}
-    for r in raw.get("data", []):
-        out[_strip(r.get("Team"))] = {"wrc_plus": _f(r.get("wRC+")),
-                                      "pa": int(r.get("PA") or 0)}
+    for row in d.get("v", []):
+        out[str(row[iT])] = {"wrc_plus": _f(row[iW]), "pa": int(float(row[iPA] or 0))}
     return out
 
 
-def fetch_team_wrc_tables(season: int) -> dict:
-    """Pre-carga las dos tablas (vs L y vs R) UNA vez para todo el slate."""
-    return {"L": _team_wrc_by_hand(season, "L"),
-            "R": _team_wrc_by_hand(season, "R")}
+def fetch_team_wrc_tables(season: int, asof: date) -> dict:
+    """Pre-carga 4 tablas UNA vez por slate: ventana 20d y temporada, ambas manos."""
+    end = (asof - timedelta(days=1)).isoformat()           # hasta ayer (juegos cerrados)
+    start20 = (asof - timedelta(days=WRC_WINDOW_DAYS)).isoformat()
+    seas_start = f"{season}-03-01"
+    return {
+        "20d":    {"L": _splits_team_wrc("L", start20, end),
+                   "R": _splits_team_wrc("R", start20, end)},
+        "season": {"L": _splits_team_wrc("L", seas_start, end),
+                   "R": _splits_team_wrc("R", seas_start, end)},
+    }
 
 
 def _wrc_lookup(tables: dict, team_abbr: str, vs_hand: str | None) -> dict | None:
-    """Busca wRC+ del equipo vs una mano en las tablas pre-cargadas.
-    PRIMARIO 20d: pendiente (Fase 3b). FALLBACK temporada: aqui, source='season'.
-    """
+    """Primario: ventana 20d si PA>=100 (source='20d'). Si no, fallback temporada."""
     if vs_hand not in ("L", "R") or not tables:
         return None
     fg = MLB_TO_FG_ABBR.get(team_abbr, team_abbr)
-    row = tables.get(vs_hand, {}).get(fg)
-    if not row or row["wrc_plus"] is None:
-        return None
-    return {"wrc_plus": row["wrc_plus"], "pa": row["pa"], "source": "season"}
+    w20 = tables.get("20d", {}).get(vs_hand, {}).get(fg)
+    if w20 and w20["wrc_plus"] is not None and w20["pa"] >= WRC_MIN_PA:
+        return {"wrc_plus": w20["wrc_plus"], "pa": w20["pa"], "source": "20d"}
+    ws = tables.get("season", {}).get(vs_hand, {}).get(fg)
+    if ws and ws["wrc_plus"] is not None:
+        return {"wrc_plus": ws["wrc_plus"], "pa": ws["pa"], "source": "season"}
+    return None
 
 
 def fetch_team_wrcplus_split(team_abbr, vs_hand, asof, season):
-    """Standalone (jala su propia tabla) para uso de un solo equipo."""
-    tables = fetch_team_wrc_tables(season) if vs_hand in ("L", "R") else {}
+    """Standalone (jala sus propias tablas) para uso de un solo equipo."""
+    tables = fetch_team_wrc_tables(season, asof) if vs_hand in ("L", "R") else {}
     return _wrc_lookup(tables, team_abbr, vs_hand)
 
 
@@ -351,15 +375,14 @@ def validate_game(game, season, asof, rows=None, wrc_tables=None,
     # CAPA 4 — wRC+ por mano (tablas pre-cargadas o jaladas aqui)
     if wrc_tables is None:
         try:
-            wrc_tables = fetch_team_wrc_tables(season)
+            wrc_tables = fetch_team_wrc_tables(season, asof)
         except Exception as e:
             wrc_tables = {}
             res["capas"]["wrc_plus"] = f"error: {type(e).__name__}: {e}"
     a["wrc"] = _wrc_lookup(wrc_tables, a["abbr"], h.get("hand"))
     h["wrc"] = _wrc_lookup(wrc_tables, h["abbr"], a.get("hand"))
     res["wrc_plus"] = {a["abbr"]: a["wrc"], h["abbr"]: h["wrc"]}
-    res["capas"].setdefault("wrc_plus",
-                            "ok (fallback temporada; primario 20d pendiente)")
+    res["capas"].setdefault("wrc_plus", "ok (primario 20d con guard; fallback temporada)")
 
     # CAPA 5 — etapa barata: condiciones no-bullpen
     conds = {a["abbr"]: _nonbullpen_conditions(a, h),
@@ -411,7 +434,7 @@ def scan_slate(day: date, incluir_empezados: bool = False) -> dict:
         except Exception as e:
             errores.append(f"fangraphs_pitching: {e}")
         try:
-            wrc_tables = fetch_team_wrc_tables(season)
+            wrc_tables = fetch_team_wrc_tables(season, day)
         except Exception as e:
             errores.append(f"wrc_tables: {e}")
 
@@ -432,6 +455,8 @@ def scan_slate(day: date, incluir_empezados: bool = False) -> dict:
                 picks.append({"matchup": r["matchup"], "pick": abbr,
                               "inicio": g.get("inicio"),
                               "abridores": r["abridores"],
+                              "abridores_metrics": r.get("abridores_metrics"),
+                              "wrc_plus": r.get("wrc_plus"),
                               "condiciones": v["condiciones"]})
 
     return {"fecha": day.isoformat(),
@@ -441,4 +466,4 @@ def scan_slate(day: date, incluir_empezados: bool = False) -> dict:
             "total_picks": len(picks), "picks": picks,
             "evaluados": evaluados,
             "errores": errores or None,
-            "nota_wrc": "wRC+ = fallback temporada (primario 20d pendiente Fase 3b)"}
+            "nota_wrc": "wRC+ = 20 dias por mano (guard 100 PA) con fallback a temporada"}

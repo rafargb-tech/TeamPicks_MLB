@@ -1,5 +1,5 @@
 """
-TeamPicks_MLB — App (v0.5.0)
+TeamPicks_MLB — App (v0.6.0)
 
 Rutas:
   GET /                        -> health check
@@ -24,7 +24,7 @@ def _parse_day(fecha):
 def health():
     return jsonify({"status": "ok",
                     "servicio": "TeamPicks_MLB",
-                    "version": "0.5.0"})
+                    "version": "0.6.0"})
 
 
 @app.get("/picks")
