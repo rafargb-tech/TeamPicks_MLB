@@ -1,12 +1,13 @@
 """
-TeamPicks_MLB — App (v0.6.0)
+TeamPicks_MLB — App (v0.7.0)
 
 Rutas:
   GET /                        -> health check
   GET /picks?fecha=YYYY-MM-DD  -> EL PRODUCTO: escanea el slate completo y
                                   devuelve los picks del dia (default = hoy)
   GET /validar?fecha=YYYY-MM-DD&equipo=NYM
-                               -> debug de UN juego con detalle completo
+                               (flag con_cuotas=1 anexa cuotas)
+                                  -> debug de UN juego con detalle completo
                                   (bullpen siempre evaluado)
 """
 from datetime import date
@@ -24,7 +25,7 @@ def _parse_day(fecha):
 def health():
     return jsonify({"status": "ok",
                     "servicio": "TeamPicks_MLB",
-                    "version": "0.6.0"})
+                    "version": "0.7.0"})
 
 
 @app.get("/picks")
@@ -34,7 +35,8 @@ def picks():
     except ValueError:
         return jsonify({"error": "fecha invalida, usa YYYY-MM-DD"}), 400
     incluir = request.args.get("incluir_empezados") in ("1", "true", "si")
-    return jsonify(dl.scan_slate(day, incluir_empezados=incluir))
+    con_cuotas = request.args.get("con_cuotas") in ("1", "true", "si")
+    return jsonify(dl.scan_slate(day, incluir_empezados=incluir, con_cuotas=con_cuotas))
 
 
 @app.get("/validar")

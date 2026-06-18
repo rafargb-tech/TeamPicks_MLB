@@ -1,10 +1,13 @@
 """
 TeamPicks_MLB — Capa de datos (modulo)
-Version: 0.6.0
+Version: 0.7.0
 
 Estrategia: Moneyline / desequilibrio pitcheo-ofensiva.
 Este modulo NO imprime: devuelve estructuras para que app.py las sirva como JSON.
 
+CAMBIO v0.7.0: cuotas moneyline (The Odds API, decimal). Solo se consultan si
+hay picks (conserva cuota mensual) o con el flag con_cuotas. Mejor precio por
+casa. Key en env var THE_ODDS_API_KEY; region en ODDS_REGION (default us).
 CAMBIO v0.6.0: wRC+ PRIMARIO de 20 dias por mano implementado (endpoint Splits
 Leaderboards), con guard de 100 PA y fallback a temporada. Temporada y 20d salen
 del MISMO endpoint (consistencia). Fase 3b completa.
@@ -27,6 +30,7 @@ incluye xMLBAMID, asi que ya no hace falta crosswalk de IDs.
 [STUB]         fetch_team_wrcplus_split(): pendiente Fase 3 (Splits Leaderboards)
 """
 from __future__ import annotations
+import os
 import re
 import json
 import urllib.request
@@ -56,6 +60,7 @@ CLOSERS_NEEDED_AVAILABLE = 2    # aprueba si >=2 de 3 cerradores estan listos
 MLB = "https://statsapi.mlb.com/api/v1"
 FG  = "https://www.fangraphs.com/api/leaders/major-league/data"
 FG_SPLITS = "https://www.fangraphs.com/api/leaders/splits/splits-leaders"
+ODDS_API = "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds"
 
 # Abreviaturas que difieren entre MLB Stats API y FanGraphs
 MLB_TO_FG_ABBR = {"AZ": "ARI", "CWS": "CHW", "KC": "KCR", "SD": "SDP",
@@ -414,9 +419,70 @@ def validate_game(game, season, asof, rows=None, wrc_tables=None,
 
 
 # ===========================================================================
-# SCAN DEL SLATE COMPLETO — el producto: picks del dia
+# CAPA 6 — CUOTAS (The Odds API)   moneyline / h2h, formato decimal
 # ===========================================================================
-def scan_slate(day: date, incluir_empezados: bool = False) -> dict:
+def _norm_team(name: str | None) -> str:
+    n = (name or "").strip()
+    return "Athletics" if "Athletics" in n else n
+
+
+def _ts(iso: str | None) -> float:
+    try:
+        return datetime.fromisoformat((iso or "").replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return 0.0
+
+
+def fetch_mlb_odds() -> tuple[list | None, str | None]:
+    """Una llamada: todas las cuotas moneyline MLB en decimal.
+    Lee la key de la env var THE_ODDS_API_KEY (region: ODDS_REGION, default us).
+    """
+    key = os.environ.get("THE_ODDS_API_KEY")
+    if not key:
+        return None, "THE_ODDS_API_KEY no configurada en el entorno"
+    region = os.environ.get("ODDS_REGION", "us")
+    url = (f"{ODDS_API}?regions={region}&markets=h2h&oddsFormat=decimal&apiKey={key}")
+    try:
+        return _get(url), None
+    except Exception as e:
+        return None, f"{type(e).__name__}: {e}"
+
+
+def _match_event(events: list, away: str, home: str, inicio: str | None):
+    tgt = {_norm_team(away), _norm_team(home)}
+    cands = [e for e in events
+             if {_norm_team(e.get("away_team")), _norm_team(e.get("home_team"))} == tgt]
+    if not cands:
+        return None
+    if len(cands) > 1:   # doubleheader: el inicio mas cercano
+        cands.sort(key=lambda e: abs(_ts(e.get("commence_time")) - _ts(inicio)))
+    return cands[0]
+
+
+def _best_price(event: dict, team_name: str) -> dict | None:
+    """Mejor cuota decimal (mas alta) para el equipo, y que casa la ofrece."""
+    pn = _norm_team(team_name)
+    best, casa = None, None
+    for bk in event.get("bookmakers", []):
+        for m in bk.get("markets", []):
+            if m.get("key") != "h2h":
+                continue
+            for o in m.get("outcomes", []):
+                price = o.get("price")
+                if _norm_team(o.get("name")) == pn and isinstance(price, (int, float)):
+                    if best is None or price > best:
+                        best, casa = price, bk.get("title")
+    if best is None:
+        return None
+    return {"cuota": round(best, 2), "casa": casa,
+            "n_casas": len(event.get("bookmakers", []))}
+
+
+# ===========================================================================
+# SCAN DEL SLATE COMPLETO — el producto: picks del dia (+ cuotas)
+# ===========================================================================
+def scan_slate(day: date, incluir_empezados: bool = False,
+               con_cuotas: bool = False) -> dict:
     season = day.year
     slate = get_slate(day)
 
@@ -448,16 +514,45 @@ def scan_slate(day: date, incluir_empezados: bool = False) -> dict:
                               "error": str(e)})
             continue
         evaluados.append({"matchup": r["matchup"], "inicio": g.get("inicio"),
+                          "_g": g,
                           "veredictos": {k: v["verdict"]
                                          for k, v in r.get("compuerta", {}).items()}})
         for abbr, v in r.get("compuerta", {}).items():
             if v["verdict"].startswith("PICK"):
+                pick_name = (g["away"]["name"] if abbr == g["away"]["abbr"]
+                             else g["home"]["name"])
                 picks.append({"matchup": r["matchup"], "pick": abbr,
-                              "inicio": g.get("inicio"),
+                              "pick_equipo": pick_name, "inicio": g.get("inicio"),
                               "abridores": r["abridores"],
                               "abridores_metrics": r.get("abridores_metrics"),
                               "wrc_plus": r.get("wrc_plus"),
-                              "condiciones": v["condiciones"]})
+                              "condiciones": v["condiciones"], "_g": g})
+
+    # CAPA 6 — cuotas: solo si hay picks (conserva cuota) o si se pide con_cuotas
+    odds_nota = None
+    if picks or (con_cuotas and a_evaluar):
+        events, err = fetch_mlb_odds()
+        if err:
+            odds_nota = f"cuotas no disponibles: {err}"
+        else:
+            for p in picks:
+                g = p["_g"]
+                ev = _match_event(events, g["away"]["name"], g["home"]["name"], p["inicio"])
+                p["cuota"] = _best_price(ev, p["pick_equipo"]) if ev else None
+            if con_cuotas:
+                for e in evaluados:
+                    g = e.get("_g")
+                    ev = _match_event(events, g["away"]["name"], g["home"]["name"],
+                                      e["inicio"]) if g else None
+                    e["cuotas"] = ({g["away"]["abbr"]: _best_price(ev, g["away"]["name"]),
+                                    g["home"]["abbr"]: _best_price(ev, g["home"]["name"])}
+                                   if ev else None)
+            odds_nota = f"cuotas: mejor precio decimal por casa (region={os.environ.get('ODDS_REGION','us')})"
+
+    for p in picks:
+        p.pop("_g", None)
+    for e in evaluados:
+        e.pop("_g", None)
 
     return {"fecha": day.isoformat(),
             "juegos_totales": len(slate),
@@ -466,4 +561,5 @@ def scan_slate(day: date, incluir_empezados: bool = False) -> dict:
             "total_picks": len(picks), "picks": picks,
             "evaluados": evaluados,
             "errores": errores or None,
+            "nota_cuotas": odds_nota,
             "nota_wrc": "wRC+ = 20 dias por mano (guard 100 PA) con fallback a temporada"}
