@@ -1,13 +1,13 @@
 """
-TeamPicks_MLB — App de validacion (v0.3.0)
+TeamPicks_MLB — App (v0.4.0)
 
 Rutas:
   GET /                        -> health check
+  GET /picks?fecha=YYYY-MM-DD  -> EL PRODUCTO: escanea el slate completo y
+                                  devuelve los picks del dia (default = hoy)
   GET /validar?fecha=YYYY-MM-DD&equipo=NYM
-       fecha  : opcional (default = hoy)
-       equipo : opcional, abreviatura MLB (ej. NYM). Si se omite, toma el
-                primer juego del dia. Acotamos a UN juego para que la prueba
-                sea rapida y no castigue la memoria del free tier.
+                               -> debug de UN juego con detalle completo
+                                  (bullpen siempre evaluado)
 """
 from datetime import date
 from flask import Flask, request, jsonify
@@ -16,11 +16,24 @@ import data_layer as dl
 app = Flask(__name__)
 
 
+def _parse_day(fecha):
+    return date.fromisoformat(fecha) if fecha else date.today()
+
+
 @app.get("/")
 def health():
     return jsonify({"status": "ok",
-                    "servicio": "TeamPicks_MLB validador",
-                    "version": "0.3.0"})
+                    "servicio": "TeamPicks_MLB",
+                    "version": "0.4.0"})
+
+
+@app.get("/picks")
+def picks():
+    try:
+        day = _parse_day(request.args.get("fecha"))
+    except ValueError:
+        return jsonify({"error": "fecha invalida, usa YYYY-MM-DD"}), 400
+    return jsonify(dl.scan_slate(day))
 
 
 @app.get("/validar")
@@ -28,7 +41,7 @@ def validar():
     fecha = request.args.get("fecha")
     equipo = request.args.get("equipo")
     try:
-        day = date.fromisoformat(fecha) if fecha else date.today()
+        day = _parse_day(fecha)
     except ValueError:
         return jsonify({"error": "fecha invalida, usa YYYY-MM-DD"}), 400
     season = day.year
@@ -50,7 +63,7 @@ def validar():
     if juego is None:
         juego = slate[0]
 
-    resultado = dl.validate_game(juego, season, day)
+    resultado = dl.validate_game(juego, season, day, lazy_bullpen=False)
     return jsonify({"fecha": day.isoformat(),
                     "juegos_en_fecha": len(slate),
                     "juego_analizado": resultado})

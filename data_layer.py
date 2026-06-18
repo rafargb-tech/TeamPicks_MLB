@@ -1,10 +1,13 @@
 """
 TeamPicks_MLB — Capa de datos (modulo)
-Version: 0.3.0
+Version: 0.4.0
 
 Estrategia: Moneyline / desequilibrio pitcheo-ofensiva.
 Este modulo NO imprime: devuelve estructuras para que app.py las sirva como JSON.
 
+CAMBIO v0.4.0: scan_slate() escanea el slate completo y devuelve los picks del
+dia. FanGraphs se pre-carga una vez por slate; el bullpen se evalua de forma
+perezosa (solo para lados que ya pasaron lo demas).
 CAMBIO v0.3.0: wRC+ por mano implementado (fallback de temporada via API
 principal con month=13/14 + team=0,ts). Primario de 20 dias pendiente (Fase 3b).
 CAMBIO v0.2.1: R3 (fatiga por conteo) pasa a modo ESTRICTO via
@@ -211,7 +214,7 @@ def get_top_closers(rows: list[dict], team_pitcher_ids: set[int]) -> dict:
 
 
 # ===========================================================================
-# CAPA 4 — wRC+ DE EQUIPO POR MANO   [STUB — Fase 3]
+# CAPA 4 — wRC+ DE EQUIPO POR MANO  (fallback temporada; primario 20d = Fase 3b)
 # ===========================================================================
 def _team_wrc_by_hand(season: int, vs_hand: str) -> dict:
     """{fg_abbr: {'wrc_plus','pa'}} de TODOS los equipos vs una mano (temporada)."""
@@ -227,60 +230,81 @@ def _team_wrc_by_hand(season: int, vs_hand: str) -> dict:
     return out
 
 
-def fetch_team_wrcplus_split(team_abbr: str, vs_hand: str | None,
-                             asof: date, season: int) -> dict | None:
-    """wRC+ del equipo vs la mano del abridor rival.
+def fetch_team_wrc_tables(season: int) -> dict:
+    """Pre-carga las dos tablas (vs L y vs R) UNA vez para todo el slate."""
+    return {"L": _team_wrc_by_hand(season, "L"),
+            "R": _team_wrc_by_hand(season, "R")}
 
-    PRIMARIO (ventana 20d por mano): PENDIENTE — necesita el endpoint Splits
-        Leaderboards (Fase 3b). En cuanto exista: si PA>=100 se usa, source='20d'.
-    FALLBACK (temporada por mano): LISTO via API principal, source='season'.
 
-    Devuelve {'wrc_plus','pa','source'} o None.
+def _wrc_lookup(tables: dict, team_abbr: str, vs_hand: str | None) -> dict | None:
+    """Busca wRC+ del equipo vs una mano en las tablas pre-cargadas.
+    PRIMARIO 20d: pendiente (Fase 3b). FALLBACK temporada: aqui, source='season'.
     """
-    if vs_hand not in ("L", "R"):
+    if vs_hand not in ("L", "R") or not tables:
         return None
     fg = MLB_TO_FG_ABBR.get(team_abbr, team_abbr)
-    row = _team_wrc_by_hand(season, vs_hand).get(fg)
+    row = tables.get(vs_hand, {}).get(fg)
     if not row or row["wrc_plus"] is None:
         return None
     return {"wrc_plus": row["wrc_plus"], "pa": row["pa"], "source": "season"}
 
 
+def fetch_team_wrcplus_split(team_abbr, vs_hand, asof, season):
+    """Standalone (jala su propia tabla) para uso de un solo equipo."""
+    tables = fetch_team_wrc_tables(season) if vs_hand in ("L", "R") else {}
+    return _wrc_lookup(tables, team_abbr, vs_hand)
+
+
 # ===========================================================================
-# CAPA 5 — COMPUERTA
+# CAPA 5 — COMPUERTA (evaluacion por etapas: barato -> caro)
 # ===========================================================================
-def evaluate_pick(pick: dict, opp: dict) -> dict:
+def _nonbullpen_conditions(pick: dict, opp: dict) -> dict:
+    """Las 6 condiciones que NO dependen del bullpen (datos ya en memoria)."""
     sp_p, sp_o = pick.get("metrics"), opp.get("metrics")
     wp, wo = pick.get("wrc"), opp.get("wrc")
-    c = {
+    return {
         "abridor_propio_FIP<3.50":  (sp_p["FIP"] < FIP_CUT) if sp_p else None,
         "abridor_propio_WHIP<1.50": (sp_p["WHIP"] < WHIP_GOOD_CUT) if sp_p else None,
         "abridor_rival_FIP>3.50":   (sp_o["FIP"] > FIP_CUT) if sp_o else None,
         "abridor_rival_WHIP>=1.50": (sp_o["WHIP"] >= WHIP_BAD_CUT) if sp_o else None,
         "ofensiva_propia_wRC+>105": (wp["wrc_plus"] > WRC_HOT_CUT) if wp else None,
         "ofensiva_rival_wRC+<105":  (wo["wrc_plus"] < WRC_WEAK_CUT) if wo else None,
-        "bullpen_>=2_listos":       pick.get("bullpen", {}).get("aprueba"),
     }
-    if any(v is None for v in c.values()):
-        verdict = "PENDIENTE (falta wRC+ y/o datos)"
-    elif all(c.values()):
-        verdict = f"PICK {pick['abbr']}"
+
+
+def _alive(conds: dict) -> bool:
+    """True solo si TODAS las condiciones no-bullpen son True (el lado sigue vivo)."""
+    return all(v is True for v in conds.values())
+
+
+def _verdict(conds: dict, bullpen_ok, abbr: str) -> dict:
+    c = dict(conds)
+    c["bullpen_>=2_listos"] = bullpen_ok
+    if any(v is None for v in conds.values()):
+        v = "PENDIENTE (faltan datos)"
+    elif not _alive(conds):
+        v = "no califica"            # ya falla algo barato; el bullpen ni se mira
+    elif bullpen_ok is True:
+        v = f"PICK {abbr}"
+    elif bullpen_ok is False:
+        v = "no califica"
     else:
-        verdict = "no califica"
-    return {"verdict": verdict, "condiciones": c}
+        v = "PENDIENTE (bullpen)"
+    return {"verdict": v, "condiciones": c}
 
 
 # ===========================================================================
-# ORQUESTADOR — valida UN juego
+# ORQUESTADOR — valida UN juego (reutiliza data pre-cargada si se le pasa)
 # ===========================================================================
-def validate_game(game: dict, season: int, asof: date) -> dict:
+def validate_game(game, season, asof, rows=None, wrc_tables=None,
+                  lazy_bullpen=True):
     a, h = game["away"], game["home"]
     res = {"gamePk": game["gamePk"], "fecha": game["fecha"],
            "matchup": f'{a["abbr"]} @ {h["abbr"]}',
            "abridores": f'{a["sp_name"]} vs {h["sp_name"]}',
            "capas": {}}
 
-    # 2A — manos (VERIFICADO)
+    # 2A — manos
     try:
         a["hand"] = get_pitch_hand(a["sp_id"]); h["hand"] = get_pitch_hand(h["sp_id"])
         res["manos"] = {a["abbr"]: a["hand"], h["abbr"]: h["hand"]}
@@ -289,13 +313,13 @@ def validate_game(game: dict, season: int, asof: date) -> dict:
         a["hand"] = h["hand"] = None
         res["capas"]["manos"] = f"error: {e}"
 
-    # FanGraphs: una sola jalada (API moderno)
-    rows = None
-    try:
-        rows = fetch_fangraphs_pitching(season)
-        res["capas"]["fangraphs_pitching"] = f"ok ({len(rows)} pitchers)"
-    except Exception as e:
-        res["capas"]["fangraphs_pitching"] = f"error: {type(e).__name__}: {e}"
+    # FanGraphs pitcheo (usa pre-cargado si viene)
+    if rows is None:
+        try:
+            rows = fetch_fangraphs_pitching(season)
+            res["capas"]["fangraphs_pitching"] = f"ok ({len(rows)} pitchers)"
+        except Exception as e:
+            res["capas"]["fangraphs_pitching"] = f"error: {type(e).__name__}: {e}"
 
     # 2B — abridores
     if rows is not None:
@@ -307,9 +331,27 @@ def validate_game(game: dict, season: int, asof: date) -> dict:
         except Exception as e:
             res["capas"]["abridores"] = f"error: {type(e).__name__}: {e}"
 
-    # 2C — cerradores + fatiga
-    if rows is not None:
-        for team in (a, h):
+    # CAPA 4 — wRC+ por mano (tablas pre-cargadas o jaladas aqui)
+    if wrc_tables is None:
+        try:
+            wrc_tables = fetch_team_wrc_tables(season)
+        except Exception as e:
+            wrc_tables = {}
+            res["capas"]["wrc_plus"] = f"error: {type(e).__name__}: {e}"
+    a["wrc"] = _wrc_lookup(wrc_tables, a["abbr"], h.get("hand"))
+    h["wrc"] = _wrc_lookup(wrc_tables, h["abbr"], a.get("hand"))
+    res["wrc_plus"] = {a["abbr"]: a["wrc"], h["abbr"]: h["wrc"]}
+    res["capas"].setdefault("wrc_plus",
+                            "ok (fallback temporada; primario 20d pendiente)")
+
+    # CAPA 5 — etapa barata: condiciones no-bullpen
+    conds = {a["abbr"]: _nonbullpen_conditions(a, h),
+             h["abbr"]: _nonbullpen_conditions(h, a)}
+
+    # etapa cara: bullpen SOLO para lados vivos (o todos si lazy_bullpen=False)
+    for team, opp in ((a, h), (h, a)):
+        alive = _alive(conds[team["abbr"]])
+        if rows is not None and (alive or not lazy_bullpen):
             try:
                 pen_ids = get_team_pitcher_ids(team["id"], season)
                 closers = get_top_closers(rows, pen_ids)
@@ -318,23 +360,57 @@ def validate_game(game: dict, season: int, asof: date) -> dict:
                 team["bullpen"]["listas"] = closers
             except Exception as e:
                 team["bullpen"] = {"aprueba": None, "error": str(e)}
-        res["bullpen"] = {a["abbr"]: a.get("bullpen"), h["abbr"]: h.get("bullpen")}
-        res["capas"]["cerradores"] = "ok"
+        else:
+            team["bullpen"] = {"aprueba": None, "evaluado": False}
+    res["bullpen"] = {a["abbr"]: a.get("bullpen"), h["abbr"]: h.get("bullpen")}
+    res["capas"]["cerradores"] = "ok"
 
-    # CAPA 4 — wRC+ por mano: ofensiva de cada uno vs la mano del abridor rival
-    # (fallback de temporada LISTO; primario de 20 dias pendiente Fase 3b)
-    try:
-        a["wrc"] = fetch_team_wrcplus_split(a["abbr"], h.get("hand"), asof, season)
-        h["wrc"] = fetch_team_wrcplus_split(h["abbr"], a.get("hand"), asof, season)
-        res["wrc_plus"] = {a["abbr"]: a["wrc"], h["abbr"]: h["wrc"]}
-        res["capas"]["wrc_plus"] = "ok (fallback temporada; primario 20d pendiente)"
-    except Exception as e:
-        a["wrc"] = h["wrc"] = None
-        res["capas"]["wrc_plus"] = f"error: {type(e).__name__}: {e}"
-
-    # CAPA 5 — compuerta (auto-excluyente: a lo mas un lado pasa)
-    if a.get("metrics") is not None or h.get("metrics") is not None:
-        res["compuerta"] = {a["abbr"]: evaluate_pick(a, h),
-                            h["abbr"]: evaluate_pick(h, a)}
-
+    # veredictos
+    res["compuerta"] = {
+        a["abbr"]: _verdict(conds[a["abbr"]], a["bullpen"].get("aprueba"), a["abbr"]),
+        h["abbr"]: _verdict(conds[h["abbr"]], h["bullpen"].get("aprueba"), h["abbr"]),
+    }
     return res
+
+
+# ===========================================================================
+# SCAN DEL SLATE COMPLETO — el producto: picks del dia
+# ===========================================================================
+def scan_slate(day: date) -> dict:
+    season = day.year
+    slate = get_slate(day)
+
+    # Pre-carga FanGraphs UNA sola vez para todo el slate
+    rows, wrc_tables, errores = None, {}, []
+    try:
+        rows = fetch_fangraphs_pitching(season)
+    except Exception as e:
+        errores.append(f"fangraphs_pitching: {e}")
+    try:
+        wrc_tables = fetch_team_wrc_tables(season)
+    except Exception as e:
+        errores.append(f"wrc_tables: {e}")
+
+    picks, evaluados = [], []
+    for g in slate:
+        try:
+            r = validate_game(g, season, day, rows=rows, wrc_tables=wrc_tables,
+                              lazy_bullpen=True)
+        except Exception as e:
+            evaluados.append({"matchup": f'{g["away"]["abbr"]} @ {g["home"]["abbr"]}',
+                              "error": str(e)})
+            continue
+        evaluados.append({"matchup": r["matchup"],
+                          "veredictos": {k: v["verdict"]
+                                         for k, v in r.get("compuerta", {}).items()}})
+        for abbr, v in r.get("compuerta", {}).items():
+            if v["verdict"].startswith("PICK"):
+                picks.append({"matchup": r["matchup"], "pick": abbr,
+                              "abridores": r["abridores"],
+                              "condiciones": v["condiciones"]})
+
+    return {"fecha": day.isoformat(), "juegos": len(slate),
+            "total_picks": len(picks), "picks": picks,
+            "evaluados": evaluados,
+            "errores": errores or None,
+            "nota_wrc": "wRC+ = fallback temporada (primario 20d pendiente Fase 3b)"}
