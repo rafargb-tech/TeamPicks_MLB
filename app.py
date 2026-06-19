@@ -1,5 +1,5 @@
 """
-TeamPicks_MLB — App (v1.0.0)
+TeamPicks_MLB — App (v1.1.0)
 
 Rutas:
   GET /                        -> DASHBOARD (capa de visualizacion)
@@ -17,7 +17,7 @@ from flask import Flask, request, jsonify, Response
 import data_layer as dl
 
 app = Flask(__name__)
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 

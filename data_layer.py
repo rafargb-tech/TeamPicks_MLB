@@ -1,10 +1,14 @@
 """
 TeamPicks_MLB — Capa de datos (modulo)
-Version: 0.7.0
+Version: 1.1.0
 
 Estrategia: Moneyline / desequilibrio pitcheo-ofensiva.
 Este modulo NO imprime: devuelve estructuras para que app.py las sirva como JSON.
 
+CAMBIO v1.1.0: deteccion de "casi-pick por WHIP rival" (pasa todo menos la
+cond 4). Se exponen las 7 condiciones, abridores y wRC+ por juego en el scan, y
+el bullpen se evalua tambien a los casi-picks (para poder relajar la cond 4 en
+el dashboard de forma fiable).
 CAMBIO v0.7.0: cuotas moneyline (The Odds API, decimal). Solo se consultan si
 hay picks (conserva cuota mensual) o con el flag con_cuotas. Mejor precio por
 casa. Key en env var THE_ODDS_API_KEY; region en ODDS_REGION (default us).
@@ -318,9 +322,18 @@ def _nonbullpen_conditions(pick: dict, opp: dict) -> dict:
     }
 
 
+RIVAL_WHIP_KEY = "abridor_rival_WHIP>=1.50"   # la condicion 4 (relajable)
+
+
 def _alive(conds: dict) -> bool:
     """True solo si TODAS las condiciones no-bullpen son True (el lado sigue vivo)."""
     return all(v is True for v in conds.values())
+
+
+def _alive_ignoring_whip(conds: dict) -> bool:
+    """True si todas las no-bullpen son True EXCEPTO la WHIP del rival (cond 4).
+    Cubre tanto al pick estricto como al casi-pick que solo falla por esa WHIP."""
+    return all(v is True for k, v in conds.items() if k != RIVAL_WHIP_KEY)
 
 
 def _verdict(conds: dict, bullpen_ok, abbr: str) -> dict:
@@ -336,7 +349,11 @@ def _verdict(conds: dict, bullpen_ok, abbr: str) -> dict:
         v = "no califica"
     else:
         v = "PENDIENTE (bullpen)"
-    return {"verdict": v, "condiciones": c}
+    # casi-pick: seria PICK si ignoramos la WHIP del rival (cond 4 es lo unico que falla)
+    casi = (conds.get(RIVAL_WHIP_KEY) is False
+            and _alive_ignoring_whip(conds)
+            and bullpen_ok is True)
+    return {"verdict": v, "condiciones": c, "casi_pick_whip": casi}
 
 
 # ===========================================================================
@@ -393,9 +410,9 @@ def validate_game(game, season, asof, rows=None, wrc_tables=None,
     conds = {a["abbr"]: _nonbullpen_conditions(a, h),
              h["abbr"]: _nonbullpen_conditions(h, a)}
 
-    # etapa cara: bullpen SOLO para lados vivos (o todos si lazy_bullpen=False)
+    # etapa cara: bullpen para lados vivos O casi-vivos (pasan todo menos WHIP rival)
     for team, opp in ((a, h), (h, a)):
-        alive = _alive(conds[team["abbr"]])
+        alive = _alive_ignoring_whip(conds[team["abbr"]])
         if rows is not None and (alive or not lazy_bullpen):
             try:
                 pen_ids = get_team_pitcher_ids(team["id"], season)
@@ -513,11 +530,17 @@ def scan_slate(day: date, incluir_empezados: bool = False,
             evaluados.append({"matchup": f'{g["away"]["abbr"]} @ {g["home"]["abbr"]}',
                               "error": str(e)})
             continue
+        comp = r.get("compuerta", {})
         evaluados.append({"matchup": r["matchup"], "inicio": g.get("inicio"),
                           "_g": g,
-                          "veredictos": {k: v["verdict"]
-                                         for k, v in r.get("compuerta", {}).items()}})
-        for abbr, v in r.get("compuerta", {}).items():
+                          "abridores": r["abridores"],
+                          "abridores_metrics": r.get("abridores_metrics"),
+                          "wrc_plus": r.get("wrc_plus"),
+                          "veredictos": {k: v["verdict"] for k, v in comp.items()},
+                          "condiciones": {k: v["condiciones"] for k, v in comp.items()},
+                          "casi_pick": {k: v.get("casi_pick_whip", False)
+                                        for k, v in comp.items()}})
+        for abbr, v in comp.items():
             if v["verdict"].startswith("PICK"):
                 pick_name = (g["away"]["name"] if abbr == g["away"]["abbr"]
                              else g["home"]["name"])

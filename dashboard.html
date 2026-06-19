@@ -18,12 +18,11 @@
   *{box-sizing:border-box}
   body{margin:0;background:var(--ink);color:var(--num);font-family:var(--ui);
        font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
-  a{color:inherit}
   .wrap{max-width:920px;margin:0 auto;padding:0 18px 64px}
 
   /* ---- header: tira de marcador ---- */
-  header{position:sticky;top:0;z-index:5;background:linear-gradient(180deg,var(--ink) 70%,rgba(13,21,33,.0));
-         padding:18px 0 10px;margin-bottom:6px}
+  header{position:sticky;top:0;z-index:5;background:linear-gradient(180deg,var(--ink) 78%,rgba(13,21,33,0));
+         padding:18px 0 10px;margin-bottom:4px}
   .top{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
   .brand{font-family:var(--disp);font-weight:700;letter-spacing:.06em;font-size:24px;line-height:1}
   .brand b{color:var(--amber)}
@@ -42,50 +41,76 @@
   .summary b{color:var(--num);font-weight:700}
   .summary .hot b{color:var(--amber)}
 
+  /* ---- controles / filtros ---- */
+  .controls{display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+       padding:10px 0 2px;margin-bottom:6px;border-bottom:1px solid var(--line)}
+  .toggle{font-family:var(--ui);font-size:13px;color:var(--muted);display:inline-flex;
+       align-items:center;gap:7px;cursor:pointer}
+  .toggle input{accent-color:var(--amber);width:15px;height:15px}
+  .info{background:none;border:1px solid var(--line);color:var(--muted);border-radius:50%;
+       width:20px;height:20px;font-family:var(--mono);font-size:12px;cursor:pointer;line-height:1;margin-left:-10px}
+  .info:hover{border-color:var(--amber-line);color:var(--amber)}
+  .infobox{background:var(--panel);border:1px solid var(--amber-line);border-radius:10px;
+       padding:13px 15px;font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:14px}
+  .infobox b{color:var(--num)}
+
   /* ---- section eyebrow ---- */
   .eyebrow{font-family:var(--disp);font-weight:600;letter-spacing:.18em;font-size:13px;
-       color:var(--muted);text-transform:uppercase;margin:30px 0 12px;display:flex;align-items:center;gap:10px}
+       color:var(--muted);text-transform:uppercase;margin:26px 0 12px;display:flex;align-items:center;gap:10px}
   .eyebrow::after{content:"";flex:1;height:1px;background:var(--line)}
+  .eyebrow.relaxhdr{color:var(--clay)}
 
   /* ---- pick card (panel encendido) ---- */
   .pick{background:linear-gradient(180deg,var(--amber-soft),transparent 60%),var(--panel);
         border:1px solid var(--amber-line);border-left:4px solid var(--amber);
         border-radius:14px;padding:18px 20px;margin-bottom:14px;
         box-shadow:0 0 0 1px rgba(255,176,46,.05),0 14px 40px -22px rgba(255,176,46,.5)}
+  .pick.relax{background:var(--panel);border-style:dashed;border-left-style:solid;
+        border-color:var(--clay);box-shadow:none}
   .pick .kick{font-family:var(--disp);font-weight:700;letter-spacing:.18em;color:var(--amber);
         font-size:13px;text-transform:uppercase}
+  .pick.relax .kick{color:var(--clay)}
   .pick .row1{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin:4px 0 2px}
   .pick .team{font-family:var(--disp);font-weight:700;font-size:46px;line-height:.95;letter-spacing:.01em}
   .pick .match{font-family:var(--mono);color:var(--muted);font-size:14px}
   .pick .sp{color:var(--dim);font-size:13px;margin-bottom:14px}
   .odds{margin-left:auto;text-align:right}
   .odds .c{font-family:var(--mono);font-weight:700;font-size:34px;color:var(--amber);line-height:1}
+  .pick.relax .odds .c{color:var(--clay)}
   .odds .src{font-family:var(--mono);font-size:11px;color:var(--muted)}
 
   /* 7 focos = la compuerta */
-  .bulbs{display:flex;gap:7px;margin:6px 0 14px;flex-wrap:wrap}
+  .bulbs{display:flex;gap:7px;margin:6px 0 12px;flex-wrap:wrap}
   .bulb{width:13px;height:13px;border-radius:50%;background:#0c1722;border:1px solid var(--line);position:relative}
   .bulb.on{background:var(--amber);border-color:var(--amber);box-shadow:0 0 9px var(--amber-line)}
   .bulb.off{background:#241a17;border-color:#3a2a22}
+  .relaxnote{font-family:var(--mono);font-size:12px;color:var(--clay);margin:-4px 0 12px}
   .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 18px;
         font-family:var(--mono);font-size:13px}
   .stats .k{color:var(--dim)} .stats .v{color:var(--num)}
 
   /* ---- sin jugada ---- */
   .empty{background:var(--panel);border:1px dashed var(--line);border-radius:14px;
-        padding:34px 20px;text-align:center}
+        padding:30px 20px;text-align:center}
   .empty h2{font-family:var(--disp);font-weight:700;letter-spacing:.12em;font-size:30px;
         color:var(--dim);margin:0 0 6px}
   .empty p{color:var(--muted);margin:0;font-size:14px}
+  .empty .casihint{margin-top:16px;color:var(--clay);font-size:13px}
+  .empty .casihint button{margin-top:8px;background:none;border:1px solid var(--clay);color:var(--clay);
+        font-family:var(--ui);font-size:13px;border-radius:8px;padding:7px 13px;cursor:pointer;display:block;margin-inline:auto}
+  .empty .casihint button:hover{background:rgba(209,122,78,.1)}
 
   /* ---- evaluados ---- */
   .game{display:grid;grid-template-columns:64px 1fr auto;gap:12px;align-items:center;
         background:var(--panel);border:1px solid var(--line);border-radius:11px;
         padding:11px 14px;margin-bottom:8px}
+  .game.iscasi{border-color:var(--clay)}
   .game .t{font-family:var(--mono);font-size:12px;color:var(--muted)}
-  .game .m{font-family:var(--disp);font-weight:600;font-size:19px;letter-spacing:.02em}
+  .game .m{font-family:var(--disp);font-weight:600;font-size:19px;letter-spacing:.02em;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
   .game .verd{font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:1px}
   .game .verd .pend{color:var(--clay)}
+  .badge-casi{font-family:var(--disp);font-weight:600;letter-spacing:.08em;font-size:11px;text-transform:uppercase;
+        color:var(--clay);border:1px solid var(--clay);border-radius:999px;padding:1px 8px}
   .lines{font-family:var(--mono);font-size:13px;text-align:right;white-space:nowrap}
   .lines .o{color:var(--num)} .lines .o.lo{color:var(--dim)}
   .lines small{color:var(--dim)}
@@ -99,9 +124,6 @@
 
   footer{margin-top:34px;border-top:1px solid var(--line);padding-top:14px;
         font-family:var(--mono);font-size:11px;color:var(--dim);line-height:1.7}
-  .toggle{font-family:var(--ui);font-size:13px;color:var(--muted);display:inline-flex;
-        align-items:center;gap:7px;cursor:pointer;margin-top:10px}
-  .toggle input{accent-color:var(--amber)}
   .msg{font-family:var(--mono);font-size:13px;color:var(--muted);padding:24px 2px}
   .msg.err{color:var(--red)}
   @media(max-width:560px){
@@ -128,9 +150,16 @@
     <div class="summary" id="summary"></div>
   </header>
 
-  <main id="main"><div class="msg" id="status">Cargando…</div></main>
+  <div class="controls">
+    <label class="toggle"><input type="checkbox" id="relaxed"> Modo relajado: ignorar WHIP del abridor rival</label>
+    <button class="info" id="infoBtn" aria-label="Qué hace el modo relajado">?</button>
+    <label class="toggle"><input type="checkbox" id="allodds"> Cuotas de todos los juegos</label>
+  </div>
+  <div class="infobox" id="infobox" hidden>
+    <b>Modo relajado — qué cambia.</b> La condición 4 exige que el abridor rival <b>también</b> tenga WHIP alta (≥1.50), como segunda señal de que es explotable más allá de su FIP. Al relajarla, confías solo en su FIP&gt;3.50. Aparecen más jugadas, pero el listón baja: un rival con FIP feo pero WHIP buena pone menos corredores en base, así que tu ofensiva quizá no capitaliza tan seguido. Úsalo para revisar candidatos cuando el modo estricto sale vacío — no como sustituto del estricto. Gasta 1 crédito de cuotas al activarse.
+  </div>
 
-  <label class="toggle"><input type="checkbox" id="allodds"> Mostrar cuotas de todos los juegos (usa 1 crédito)</label>
+  <main id="main"><div class="msg">Cargando…</div></main>
 
   <footer id="notes"></footer>
 </div>
@@ -146,9 +175,11 @@ const COND = {
   "ofensiva_rival_wRC+<105":"Ofensiva rival wRC+<105",
   "bullpen_>=2_listos":"Bullpen ≥2 listos",
 };
+const RIVAL_WHIP = "abridor_rival_WHIP>=1.50";
 const localTime = iso => { try{ return new Date(iso)
   .toLocaleTimeString([], {hour:'numeric', minute:'2-digit'}); }catch(e){ return ''; } };
 const esc = s => (s==null?'':String(s)).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const teamsOf = m => (m||' @ ').split(' @ ');   // [visitante, local]
 
 function bulbs(cond){
   return '<div class="bulbs">' + Object.keys(COND).map(k=>{
@@ -158,7 +189,8 @@ function bulbs(cond){
   }).join('') + '</div>';
 }
 
-function pickCard(p){
+// Tarjeta de jugada. p:{matchup,pick,abridores,abridores_metrics,wrc_plus,condiciones,cuota}
+function card(p, relaxed){
   const opp = Object.keys(p.abridores_metrics||{}).find(a=>a!==p.pick) || '';
   const m = p.abridores_metrics||{}, w = p.wrc_plus||{};
   const mp = m[p.pick]||{}, mo = m[opp]||{}, wp = w[p.pick]||{}, wo = w[opp]||{};
@@ -166,8 +198,11 @@ function pickCard(p){
   const odds = c ? `<div class="odds"><div class="c">${c.cuota.toFixed(2)}</div>
        <div class="src">${esc(c.casa)} · ${c.n_casas} casas</div></div>` :
        `<div class="odds"><div class="src">cuota n/d</div></div>`;
-  return `<div class="pick">
-    <div class="kick">▲ Apostar</div>
+  const note = relaxed
+    ? `<div class="relaxnote">▸ Relajado: se ignoró la WHIP del rival (${esc(opp)} ${mo.WHIP??'–'}, pide ≥1.50). Las otras 6 condiciones sí pasan.</div>`
+    : '';
+  return `<div class="pick ${relaxed?'relax':''}">
+    <div class="kick">${relaxed?'▸ Pick relajado':'▲ Apostar'}</div>
     <div class="row1">
       <div class="team">${esc(p.pick)}</div>
       <div><div class="match">${esc(p.matchup)}</div></div>
@@ -175,6 +210,7 @@ function pickCard(p){
     </div>
     <div class="sp">${esc(p.abridores)}</div>
     ${bulbs(p.condiciones)}
+    ${note}
     <div class="stats">
       <div><span class="k">${esc(p.pick)} SP</span> <span class="v">FIP ${mp.FIP??'–'} · WHIP ${mp.WHIP??'–'}</span></div>
       <div><span class="k">${esc(opp)} SP</span> <span class="v">FIP ${mo.FIP??'–'} · WHIP ${mo.WHIP??'–'}</span></div>
@@ -184,50 +220,89 @@ function pickCard(p){
   </div>`;
 }
 
-function gameRow(g){
-  const verds = g.veredictos||{};
-  const ab = Object.keys(verds);
-  const vtxt = ab.map(t=>{
-    const v=verds[t]; const pend=/PENDIENTE/.test(v);
-    return `${esc(t)} <span class="${pend?'pend':''}">${pend?'pend.':'no'}</span>`;
-  }).join('  ·  ');
+// Construye los casi-picks (relajados) a partir de los evaluados
+function nearPicks(d){
+  const out=[];
+  (d.evaluados||[]).forEach(e=>{
+    const casi = e.casi_pick||{};
+    Object.keys(casi).forEach(ab=>{
+      if(casi[ab]){
+        out.push({matchup:e.matchup, pick:ab, abridores:e.abridores,
+          abridores_metrics:e.abridores_metrics, wrc_plus:e.wrc_plus,
+          condiciones:(e.condiciones||{})[ab],
+          cuota:(e.cuotas||{})[ab], inicio:e.inicio});
+      }
+    });
+  });
+  return out;
+}
+
+function gameRow(e){
+  const [away, home] = teamsOf(e.matchup);          // orden fijo visitante→local
+  const order = [away, home];
+  const verds = e.veredictos||{};
+  const casi = e.casi_pick||{};
+  const isCasi = order.some(t=>casi[t]);
+  // veredicto: si ambos coinciden, uno solo; si difieren, por equipo
+  const vlist = order.map(t=>verds[t]);
+  let vtxt;
+  if(vlist[0]===vlist[1]){
+    vtxt = /PENDIENTE/.test(vlist[0]||'') ? '<span class="pend">pendiente — faltan datos</span>' : 'no califica';
+  } else {
+    vtxt = order.map(t=>{
+      const v=verds[t]; const pend=/PENDIENTE/.test(v||'');
+      return `${esc(t)} <span class="${pend?'pend':''}">${pend?'pend.':'no'}</span>`;
+    }).join('  ·  ');
+  }
+  const badge = isCasi ? '<span class="badge-casi">casi · solo WHIP rival</span>' : '';
   let lines='';
-  if(g.cuotas){
-    lines = '<div class="lines">' + ab.map(t=>{
-      const o=g.cuotas[t]; if(!o) return `${esc(t)} <small>n/d</small>`;
+  if(e.cuotas){
+    lines = '<div class="lines">' + order.map(t=>{
+      const o=e.cuotas[t]; if(!o) return `${esc(t)} <small>n/d</small>`;
       const lo = o.cuota<1.7?'lo':'';
       return `${esc(t)} <span class="o ${lo}">${o.cuota.toFixed(2)}</span>`;
     }).join('<br>') + '</div>';
   }
-  return `<div class="game">
-    <div class="t">${localTime(g.inicio)}</div>
-    <div><div class="m">${esc(g.matchup)}</div><div class="verd">${vtxt}</div></div>
+  return `<div class="game ${isCasi?'iscasi':''}">
+    <div class="t">${localTime(e.inicio)}</div>
+    <div><div class="m">${esc(e.matchup)} ${badge}</div><div class="verd">${vtxt}</div></div>
     ${lines||'<div></div>'}
   </div>`;
 }
 
 function render(d){
-  $('#ver').textContent = 'v'+(window.__ver||'1.0');
-  // summary
+  $('#ver').textContent = 'v'+(window.__ver||'1.1');
+  const relaxed = $('#relaxed').checked;
+  const near = nearPicks(d);
   $('#summary').innerHTML =
     `<span><b>${d.juegos_totales}</b> juegos</span>
      <span><b>${d.evaluados_apostables}</b> apostables</span>
-     <span class="hot"><b>${d.total_picks}</b> ${d.total_picks===1?'jugada':'jugadas'}</span>`;
-  let html = '';
-  // picks
-  html += `<div class="eyebrow">Jugadas de hoy</div>`;
-  if(d.picks && d.picks.length){
-    html += d.picks.map(pickCard).join('');
-  } else {
+     <span class="hot"><b>${d.total_picks}</b> ${d.total_picks===1?'jugada':'jugadas'}</span>
+     ${near.length?`<span style="color:var(--clay)"><b style="color:var(--clay)">${near.length}</b> casi</span>`:''}`;
+
+  let html = `<div class="eyebrow">Jugadas de hoy</div>`;
+  const hasStrict = d.picks && d.picks.length;
+  if(hasStrict) html += d.picks.map(p=>card(p,false)).join('');
+
+  if(relaxed && near.length){
+    if(!hasStrict){} // nada
+    html += `<div class="eyebrow relaxhdr">Picks relajados · sin WHIP rival</div>`;
+    html += near.map(p=>card(p,true)).join('');
+  } else if(!hasStrict){
+    // estado vacío
+    let hint='';
+    if(near.length){
+      hint = `<div class="casihint">Hay ${near.length} casi-jugada${near.length>1?'s':''} que solo fallan la WHIP del rival.
+        <button id="goRelax">Revisar en modo relajado</button></div>`;
+    }
     html += `<div class="empty"><h2>Sin jugada hoy</h2>
-      <p>El sistema revisó ${d.evaluados_apostables} ${d.evaluados_apostables===1?'juego apostable':'juegos apostables'} y ninguno cumple las 7 condiciones. Pasar es una decisión válida.</p></div>`;
+      <p>El sistema revisó ${d.evaluados_apostables} ${d.evaluados_apostables===1?'juego apostable':'juegos apostables'} y ninguno cumple las 7 condiciones. Pasar es una decisión válida.</p>${hint}</div>`;
   }
-  // evaluados
+
   if(d.evaluados && d.evaluados.length){
     html += `<div class="eyebrow">Evaluados</div>`;
     html += d.evaluados.map(gameRow).join('');
   }
-  // omitidos
   if(d.omitidos_ya_empezados && d.omitidos_ya_empezados.length){
     html += `<div class="eyebrow">Fuera (no apostables)</div><div class="omit">`;
     html += d.omitidos_ya_empezados.map(o=>{
@@ -237,7 +312,10 @@ function render(d){
     }).join('') + `</div>`;
   }
   $('#main').innerHTML = html;
-  // notas
+
+  const gr = $('#goRelax');
+  if(gr) gr.onclick = ()=>{ $('#relaxed').checked = true; load(); };
+
   const notes=[];
   if(d.nota_wrc) notes.push(esc(d.nota_wrc));
   if(d.nota_cuotas) notes.push(esc(d.nota_cuotas));
@@ -247,14 +325,15 @@ function render(d){
 
 async function load(){
   const date = $('#date').value;
-  const all = $('#allodds').checked ? '&con_cuotas=1' : '';
-  $('#status') && ($('#main').innerHTML = '<div class="msg">Cargando slate…</div>');
+  // modo relajado fuerza cuotas (para precios de los casi-picks)
+  const wantOdds = $('#allodds').checked || $('#relaxed').checked;
+  $('#main').innerHTML = '<div class="msg">Cargando slate…</div>';
   try{
     const [v, r] = await Promise.all([
       fetch('/health').then(x=>x.json()).catch(()=>({})),
-      fetch(`/picks?fecha=${date}${all}`).then(x=>x.json())
+      fetch(`/picks?fecha=${date}${wantOdds?'&con_cuotas=1':''}`).then(x=>x.json())
     ]);
-    window.__ver = v.version || '1.0';
+    window.__ver = v.version || '1.1';
     if(r.error){ $('#main').innerHTML = `<div class="msg err">${esc(r.error)}</div>`; return; }
     render(r);
   }catch(e){
@@ -274,6 +353,8 @@ $('#next').onclick=()=>shift(1);
 $('#refresh').onclick=load;
 $('#date').onchange=load;
 $('#allodds').onchange=load;
+$('#relaxed').onchange=load;
+$('#infoBtn').onclick=()=>{ const b=$('#infobox'); b.hidden=!b.hidden; };
 load();
 </script>
 </body>
