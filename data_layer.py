@@ -5,10 +5,10 @@ Version: 1.1.0
 Estrategia: Moneyline / desequilibrio pitcheo-ofensiva.
 Este modulo NO imprime: devuelve estructuras para que app.py las sirva como JSON.
 
-CAMBIO v1.1.0: deteccion de "casi-pick por WHIP rival" (pasa todo menos la
-cond 4). Se exponen las 7 condiciones, abridores y wRC+ por juego en el scan, y
-el bullpen se evalua tambien a los casi-picks (para poder relajar la cond 4 en
-el dashboard de forma fiable).
+CAMBIO v1.1.0: modo relajado de la condicion 4. En vez de eliminar la WHIP del
+rival, baja su umbral a 1.40 (de 1.50). Un "casi-pick" tiene WHIP rival en
+[1.40, 1.50) y cumple todo lo demas (incl. bullpen, que se evalua tambien a
+estos casos). Se exponen las 7 condiciones, abridores y wRC+ por juego.
 CAMBIO v0.7.0: cuotas moneyline (The Odds API, decimal). Solo se consultan si
 hay picks (conserva cuota mensual) o con el flag con_cuotas. Mejor precio por
 casa. Key en env var THE_ODDS_API_KEY; region en ODDS_REGION (default us).
@@ -46,6 +46,7 @@ from datetime import date, datetime, timedelta
 FIP_CUT          = 3.50   # abridor bueno si < ; malo si >
 WHIP_GOOD_CUT    = 1.50   # abridor bueno si WHIP < 1.50
 WHIP_BAD_CUT     = 1.50   # abridor malo  si WHIP >= 1.50  (banda "1.50 o mas")
+WHIP_BAD_CUT_RELAX = 1.40 # modo relajado: condicion 4 baja el umbral a 1.40
 WRC_HOT_CUT      = 105     # ofensiva encendida si wRC+ > 105
 WRC_WEAK_CUT     = 105     # ofensiva debil     si wRC+ < 105
 
@@ -336,7 +337,7 @@ def _alive_ignoring_whip(conds: dict) -> bool:
     return all(v is True for k, v in conds.items() if k != RIVAL_WHIP_KEY)
 
 
-def _verdict(conds: dict, bullpen_ok, abbr: str) -> dict:
+def _verdict(conds: dict, bullpen_ok, abbr: str, rival_whip=None) -> dict:
     c = dict(conds)
     c["bullpen_>=2_listos"] = bullpen_ok
     if any(v is None for v in conds.values()):
@@ -349,11 +350,15 @@ def _verdict(conds: dict, bullpen_ok, abbr: str) -> dict:
         v = "no califica"
     else:
         v = "PENDIENTE (bullpen)"
-    # casi-pick: seria PICK si ignoramos la WHIP del rival (cond 4 es lo unico que falla)
+    # casi-pick: seria PICK con el umbral relajado de WHIP rival (>=1.40 en vez de 1.50);
+    # es decir, WHIP rival en [1.40, 1.50) y todo lo demas (incl. bullpen) cumple.
     casi = (conds.get(RIVAL_WHIP_KEY) is False
             and _alive_ignoring_whip(conds)
-            and bullpen_ok is True)
-    return {"verdict": v, "condiciones": c, "casi_pick_whip": casi}
+            and bullpen_ok is True
+            and rival_whip is not None
+            and rival_whip >= WHIP_BAD_CUT_RELAX)
+    return {"verdict": v, "condiciones": c, "casi_pick_whip": casi,
+            "rival_whip": rival_whip}
 
 
 # ===========================================================================
@@ -427,10 +432,12 @@ def validate_game(game, season, asof, rows=None, wrc_tables=None,
     res["bullpen"] = {a["abbr"]: a.get("bullpen"), h["abbr"]: h.get("bullpen")}
     res["capas"]["cerradores"] = "ok"
 
-    # veredictos
+    # veredictos (se pasa la WHIP del abridor rival para el chequeo relajado)
+    a_rival_whip = (h.get("metrics") or {}).get("WHIP")
+    h_rival_whip = (a.get("metrics") or {}).get("WHIP")
     res["compuerta"] = {
-        a["abbr"]: _verdict(conds[a["abbr"]], a["bullpen"].get("aprueba"), a["abbr"]),
-        h["abbr"]: _verdict(conds[h["abbr"]], h["bullpen"].get("aprueba"), h["abbr"]),
+        a["abbr"]: _verdict(conds[a["abbr"]], a["bullpen"].get("aprueba"), a["abbr"], a_rival_whip),
+        h["abbr"]: _verdict(conds[h["abbr"]], h["bullpen"].get("aprueba"), h["abbr"], h_rival_whip),
     }
     return res
 

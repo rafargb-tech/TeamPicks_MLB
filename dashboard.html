@@ -84,6 +84,7 @@
   .bulb{width:13px;height:13px;border-radius:50%;background:#0c1722;border:1px solid var(--line);position:relative}
   .bulb.on{background:var(--amber);border-color:var(--amber);box-shadow:0 0 9px var(--amber-line)}
   .bulb.off{background:#241a17;border-color:#3a2a22}
+  .bulb.relax{background:var(--clay);border-color:var(--clay);box-shadow:0 0 8px rgba(209,122,78,.55)}
   .relaxnote{font-family:var(--mono);font-size:12px;color:var(--clay);margin:-4px 0 12px}
   .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 18px;
         font-family:var(--mono);font-size:13px}
@@ -151,12 +152,12 @@
   </header>
 
   <div class="controls">
-    <label class="toggle"><input type="checkbox" id="relaxed"> Modo relajado: ignorar WHIP del abridor rival</label>
+    <label class="toggle"><input type="checkbox" id="relaxed"> Modo relajado: WHIP del abridor rival ≥ 1.40 (estricto: ≥ 1.50)</label>
     <button class="info" id="infoBtn" aria-label="Qué hace el modo relajado">?</button>
     <label class="toggle"><input type="checkbox" id="allodds"> Cuotas de todos los juegos</label>
   </div>
   <div class="infobox" id="infobox" hidden>
-    <b>Modo relajado — qué cambia.</b> La condición 4 exige que el abridor rival <b>también</b> tenga WHIP alta (≥1.50), como segunda señal de que es explotable más allá de su FIP. Al relajarla, confías solo en su FIP&gt;3.50. Aparecen más jugadas, pero el listón baja: un rival con FIP feo pero WHIP buena pone menos corredores en base, así que tu ofensiva quizá no capitaliza tan seguido. Úsalo para revisar candidatos cuando el modo estricto sale vacío — no como sustituto del estricto. Gasta 1 crédito de cuotas al activarse.
+    <b>Modo relajado — qué cambia.</b> La condición 4 estricta pide que el abridor rival tenga WHIP <b>≥ 1.50</b>. El modo relajado baja ese umbral a <b>≥ 1.40</b>: deja entrar rivales con WHIP entre 1.40 y 1.50 (casi tan explotables), pero <b>no</b> elimina la condición — un rival con WHIP buena (&lt;1.40) sigue descartado. Todo lo demás —las otras 6 condiciones, incluido el bullpen— se exige igual. Úsalo para revisar candidatos cuando el modo estricto sale vacío. Gasta 1 crédito de cuotas al activarse.
   </div>
 
   <main id="main"><div class="msg">Cargando…</div></main>
@@ -181,11 +182,13 @@ const localTime = iso => { try{ return new Date(iso)
 const esc = s => (s==null?'':String(s)).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const teamsOf = m => (m||' @ ').split(' @ ');   // [visitante, local]
 
-function bulbs(cond){
+function bulbs(cond, relaxRivalWhip){
   return '<div class="bulbs">' + Object.keys(COND).map(k=>{
     const v = cond ? cond[k] : null;
-    const cls = v===true?'on':(v===false?'off':'');
-    return `<span class="bulb ${cls}" title="${esc(COND[k])}: ${v===true?'sí':v===false?'no':'—'}"></span>`;
+    let cls = v===true?'on':(v===false?'off':'');
+    let tip = `${esc(COND[k])}: ${v===true?'sí':v===false?'no':'—'}`;
+    if(relaxRivalWhip && k===RIVAL_WHIP && v===false){ cls='relax'; tip=`${esc(COND[k])}: relajado (pasa con ≥1.40)`; }
+    return `<span class="bulb ${cls}" title="${tip}"></span>`;
   }).join('') + '</div>';
 }
 
@@ -199,7 +202,7 @@ function card(p, relaxed){
        <div class="src">${esc(c.casa)} · ${c.n_casas} casas</div></div>` :
        `<div class="odds"><div class="src">cuota n/d</div></div>`;
   const note = relaxed
-    ? `<div class="relaxnote">▸ Relajado: se ignoró la WHIP del rival (${esc(opp)} ${mo.WHIP??'–'}, pide ≥1.50). Las otras 6 condiciones sí pasan.</div>`
+    ? `<div class="relaxnote">▸ Relajado: WHIP de ${esc(opp)} es ${mo.WHIP??'–'} — cumple el umbral relajado (≥1.40); el estricto pide ≥1.50. Las otras 6 condiciones pasan en estricto.</div>`
     : '';
   return `<div class="pick ${relaxed?'relax':''}">
     <div class="kick">${relaxed?'▸ Pick relajado':'▲ Apostar'}</div>
@@ -209,7 +212,7 @@ function card(p, relaxed){
       ${odds}
     </div>
     <div class="sp">${esc(p.abridores)}</div>
-    ${bulbs(p.condiciones)}
+    ${bulbs(p.condiciones, relaxed)}
     ${note}
     <div class="stats">
       <div><span class="k">${esc(p.pick)} SP</span> <span class="v">FIP ${mp.FIP??'–'} · WHIP ${mp.WHIP??'–'}</span></div>
@@ -254,7 +257,13 @@ function gameRow(e){
       return `${esc(t)} <span class="${pend?'pend':''}">${pend?'pend.':'no'}</span>`;
     }).join('  ·  ');
   }
-  const badge = isCasi ? '<span class="badge-casi">casi · solo WHIP rival</span>' : '';
+  const casiTeam = order.find(t=>casi[t]);
+  let badge='';
+  if(casiTeam){
+    const opp = order.find(t=>t!==casiTeam);
+    const rw = ((e.abridores_metrics||{})[opp]||{}).WHIP;
+    badge = `<span class="badge-casi">casi · WHIP rival ${rw??''}</span>`;
+  }
   let lines='';
   if(e.cuotas){
     lines = '<div class="lines">' + order.map(t=>{
@@ -286,13 +295,13 @@ function render(d){
 
   if(relaxed && near.length){
     if(!hasStrict){} // nada
-    html += `<div class="eyebrow relaxhdr">Picks relajados · sin WHIP rival</div>`;
+    html += `<div class="eyebrow relaxhdr">Picks relajados · WHIP rival ≥ 1.40</div>`;
     html += near.map(p=>card(p,true)).join('');
   } else if(!hasStrict){
     // estado vacío
     let hint='';
     if(near.length){
-      hint = `<div class="casihint">Hay ${near.length} casi-jugada${near.length>1?'s':''} que solo fallan la WHIP del rival.
+      hint = `<div class="casihint">Hay ${near.length} casi-jugada${near.length>1?'s':''} que pasan con WHIP rival ≥ 1.40.
         <button id="goRelax">Revisar en modo relajado</button></div>`;
     }
     html += `<div class="empty"><h2>Sin jugada hoy</h2>
