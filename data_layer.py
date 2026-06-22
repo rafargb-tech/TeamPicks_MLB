@@ -1,10 +1,12 @@
 """
 TeamPicks_MLB — Capa de datos (modulo)
-Version: 1.1.0
+Version: 1.2.0
 
 Estrategia: Moneyline / desequilibrio pitcheo-ofensiva.
 Este modulo NO imprime: devuelve estructuras para que app.py las sirva como JSON.
 
+CAMBIO v1.2.0: el dashboard expone el detalle de las 7 condiciones por
+equipo en cada juego (transparencia/debug). Sin cambios de logica.
 CAMBIO v1.1.0: modo relajado de la condicion 4. En vez de eliminar la WHIP del
 rival, baja su umbral a 1.40 (de 1.50). Un "casi-pick" tiene WHIP rival en
 [1.40, 1.50) y cumple todo lo demas (incl. bullpen, que se evalua tambien a

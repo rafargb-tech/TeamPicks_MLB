@@ -102,10 +102,23 @@
   .empty .casihint button:hover{background:rgba(209,122,78,.1)}
 
   /* ---- evaluados ---- */
-  .game{display:grid;grid-template-columns:64px 1fr auto;gap:12px;align-items:center;
-        background:var(--panel);border:1px solid var(--line);border-radius:11px;
-        padding:11px 14px;margin-bottom:8px}
+  .game{background:var(--panel);border:1px solid var(--line);border-radius:11px;margin-bottom:8px;overflow:hidden}
   .game.iscasi{border-color:var(--clay)}
+  .game.flat{display:grid;grid-template-columns:64px 1fr auto auto;gap:12px;align-items:center;padding:11px 14px}
+  .game>summary{display:grid;grid-template-columns:64px 1fr auto auto;gap:12px;align-items:center;padding:11px 14px;cursor:pointer;list-style:none}
+  .game>summary::-webkit-details-marker{display:none}
+  .game>summary:hover{background:rgba(255,255,255,.025)}
+  .exp{font-family:var(--mono);color:var(--dim);font-size:12px}
+  .game[open] .exp{color:var(--amber)}
+  .counts{font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:3px}
+  .cond-detail{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:2px 14px 14px;border-top:1px solid var(--line)}
+  .tc-head{font-family:var(--disp);font-weight:600;font-size:16px;letter-spacing:.04em;margin:10px 0 6px;display:flex;gap:8px;align-items:baseline}
+  .tc-head small{font-family:var(--mono);font-size:11px;color:var(--dim);font-weight:400}
+  .cr{display:grid;grid-template-columns:15px 1fr auto;gap:8px;align-items:center;font-size:12.5px;padding:3px 0;border-bottom:1px solid rgba(41,58,78,.45)}
+  .cr .ck{font-family:var(--mono);font-weight:700;text-align:center}
+  .cr.ok .ck{color:var(--green)} .cr.no .ck{color:var(--red)} .cr.na .ck{color:var(--dim)}
+  .cr .cl{color:var(--muted)} .cr.no .cl{color:var(--num)}
+  .cr .cv{font-family:var(--mono);color:var(--num)} .cr.na .cv{color:var(--dim)}
   .game .t{font-family:var(--mono);font-size:12px;color:var(--muted)}
   .game .m{font-family:var(--disp);font-weight:600;font-size:19px;letter-spacing:.02em;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
   .game .verd{font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:1px}
@@ -129,7 +142,7 @@
   .msg.err{color:var(--red)}
   @media(max-width:560px){
     .pick .team{font-size:38px}.odds .c{font-size:28px}
-    .game{grid-template-columns:54px 1fr;}.lines{grid-column:1/-1;text-align:left;margin-top:4px}
+    .game>summary,.game.flat{grid-template-columns:50px 1fr auto;}.lines{grid-column:1/-1;text-align:left;margin-top:4px}.cond-detail{grid-template-columns:1fr}
   }
   @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
@@ -155,6 +168,7 @@
     <label class="toggle"><input type="checkbox" id="relaxed"> Modo relajado: WHIP del abridor rival ≥ 1.40 (estricto: ≥ 1.50)</label>
     <button class="info" id="infoBtn" aria-label="Qué hace el modo relajado">?</button>
     <label class="toggle"><input type="checkbox" id="allodds"> Cuotas de todos los juegos</label>
+    <label class="toggle"><input type="checkbox" id="showcond"> Ver condiciones de cada juego</label>
   </div>
   <div class="infobox" id="infobox" hidden>
     <b>Modo relajado — qué cambia.</b> La condición 4 estricta pide que el abridor rival tenga WHIP <b>≥ 1.50</b>. El modo relajado baja ese umbral a <b>≥ 1.40</b>: deja entrar rivales con WHIP entre 1.40 y 1.50 (casi tan explotables), pero <b>no</b> elimina la condición — un rival con WHIP buena (&lt;1.40) sigue descartado. Todo lo demás —las otras 6 condiciones, incluido el bullpen— se exige igual. Úsalo para revisar candidatos cuando el modo estricto sale vacío. Gasta 1 crédito de cuotas al activarse.
@@ -240,11 +254,39 @@ function nearPicks(d){
   return out;
 }
 
-function gameRow(e){
+// valor real asociado a cada condicion (para el detalle)
+function condValue(key, team, opp, m, w){
+  const mt=m[team]||{}, mo=m[opp]||{}, wt=w[team]||{}, wo=w[opp]||{};
+  switch(key){
+    case 'abridor_propio_FIP<3.50':  return mt.FIP;
+    case 'abridor_propio_WHIP<1.50': return mt.WHIP;
+    case 'abridor_rival_FIP>3.50':   return mo.FIP;
+    case 'abridor_rival_WHIP>=1.50': return mo.WHIP;
+    case 'ofensiva_propia_wRC+>105': return wt.wrc_plus!=null ? `${wt.wrc_plus}${wt.source?' ('+wt.source+')':''}` : null;
+    case 'ofensiva_rival_wRC+<105':  return wo.wrc_plus;
+    default: return null;   // bullpen: solo ✓/✗/—
+  }
+}
+
+// bloque de un equipo: las 7 condiciones con ✓/✗/— + valor
+function teamCond(team, opp, cond, m, w){
+  const n = Object.values(cond||{}).filter(v=>v===true).length;
+  const rows = Object.keys(COND).map(k=>{
+    const v = cond ? cond[k] : null;
+    const cls = v===true?'ok':(v===false?'no':'na');
+    const mark = v===true?'✓':(v===false?'✗':'—');
+    const val = condValue(k, team, opp, m, w);
+    return `<div class="cr ${cls}"><span class="ck">${mark}</span>
+      <span class="cl">${esc(COND[k])}</span><span class="cv">${val==null?'—':esc(val)}</span></div>`;
+  }).join('');
+  return `<div class="team-cond"><div class="tc-head">${esc(team)} <small>${n}/7 condiciones</small></div>${rows}</div>`;
+}
+
+function gameRow(e, openAll){
   const [away, home] = teamsOf(e.matchup);          // orden fijo visitante→local
   const order = [away, home];
-  const verds = e.veredictos||{};
-  const casi = e.casi_pick||{};
+  const verds = e.veredictos||{}, casi = e.casi_pick||{}, cond = e.condiciones||{};
+  const m = e.abridores_metrics||{}, w = e.wrc_plus||{};
   const isCasi = order.some(t=>casi[t]);
   // veredicto: si ambos coinciden, uno solo; si difieren, por equipo
   const vlist = order.map(t=>verds[t]);
@@ -261,9 +303,13 @@ function gameRow(e){
   let badge='';
   if(casiTeam){
     const opp = order.find(t=>t!==casiTeam);
-    const rw = ((e.abridores_metrics||{})[opp]||{}).WHIP;
+    const rw = (m[opp]||{}).WHIP;
     badge = `<span class="badge-casi">casi · WHIP rival ${rw??''}</span>`;
   }
+  const hasCond = !!(cond[away] || cond[home]);
+  const cnt = t => Object.values(cond[t]||{}).filter(v=>v===true).length;
+  const counts = hasCond
+    ? `<div class="counts">${esc(away)} ${cnt(away)}/7 · ${esc(home)} ${cnt(home)}/7</div>` : '';
   let lines='';
   if(e.cuotas){
     lines = '<div class="lines">' + order.map(t=>{
@@ -272,15 +318,19 @@ function gameRow(e){
       return `${esc(t)} <span class="o ${lo}">${o.cuota.toFixed(2)}</span>`;
     }).join('<br>') + '</div>';
   }
-  return `<div class="game ${isCasi?'iscasi':''}">
-    <div class="t">${localTime(e.inicio)}</div>
-    <div><div class="m">${esc(e.matchup)} ${badge}</div><div class="verd">${vtxt}</div></div>
-    ${lines||'<div></div>'}
-  </div>`;
+  const head = `<div class="t">${localTime(e.inicio)}</div>
+      <div><div class="m">${esc(e.matchup)} ${badge}</div><div class="verd">${vtxt}</div>${counts}</div>
+      ${lines||'<div></div>'}`;
+  if(!hasCond) return `<div class="game flat ${isCasi?'iscasi':''}">${head}<span></span></div>`;
+  const detail = `<div class="cond-detail">${teamCond(away,home,cond[away],m,w)}${teamCond(home,away,cond[home],m,w)}</div>`;
+  return `<details class="game ${isCasi?'iscasi':''}" ${openAll?'open':''}>
+    <summary>${head}<span class="exp">▾</span></summary>
+    ${detail}
+  </details>`;
 }
 
 function render(d){
-  $('#ver').textContent = 'v'+(window.__ver||'1.1');
+  $('#ver').textContent = 'v'+(window.__ver||'1.2');
   const relaxed = $('#relaxed').checked;
   const near = nearPicks(d);
   $('#summary').innerHTML =
@@ -309,8 +359,9 @@ function render(d){
   }
 
   if(d.evaluados && d.evaluados.length){
+    const showAll = $('#showcond').checked;
     html += `<div class="eyebrow">Evaluados</div>`;
-    html += d.evaluados.map(gameRow).join('');
+    html += d.evaluados.map(e=>gameRow(e, showAll)).join('');
   }
   if(d.omitidos_ya_empezados && d.omitidos_ya_empezados.length){
     html += `<div class="eyebrow">Fuera (no apostables)</div><div class="omit">`;
@@ -342,8 +393,9 @@ async function load(){
       fetch('/health').then(x=>x.json()).catch(()=>({})),
       fetch(`/picks?fecha=${date}${wantOdds?'&con_cuotas=1':''}`).then(x=>x.json())
     ]);
-    window.__ver = v.version || '1.1';
+    window.__ver = v.version || '1.2';
     if(r.error){ $('#main').innerHTML = `<div class="msg err">${esc(r.error)}</div>`; return; }
+    window.__data = r;
     render(r);
   }catch(e){
     $('#main').innerHTML = `<div class="msg err">No se pudo cargar: ${esc(e.message)}. Reintenta con ↻.</div>`;
@@ -363,6 +415,7 @@ $('#refresh').onclick=load;
 $('#date').onchange=load;
 $('#allodds').onchange=load;
 $('#relaxed').onchange=load;
+$('#showcond').onchange=()=>{ if(window.__data) render(window.__data); };
 $('#infoBtn').onclick=()=>{ const b=$('#infobox'); b.hidden=!b.hidden; };
 load();
 </script>
